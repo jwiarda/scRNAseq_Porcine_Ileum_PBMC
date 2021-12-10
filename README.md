@@ -7,5 +7,3 @@ Scripts for analysis of single-cell data from ileum, PBMCs, or ILCs from combine
 *
 *
 *
-
-Computational analyses were executed by collarborative efforts of Jayne Wiarda, Julian Trachsel, and Sathesh Sivasankaran. 
