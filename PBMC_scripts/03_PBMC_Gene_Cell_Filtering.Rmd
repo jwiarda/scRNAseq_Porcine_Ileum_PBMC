@@ -1,0 +1,490 @@
+---
+title: "Removing Non-expressed Genes and Poor Quality Cells"
+author: "Jayne Wiarda"
+date: "2Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We will be removing genes that were not expressed in any of the cells of our PBMC scRNA-seq samples. In addition, we will be removing cells that are of poor quality, as indicated by a high percentage of mitochondrial genes, low number of total genes detected, and/or low number of unique molecular identifiers (UMIs) detected in a cell, mirroring thresholds used for ileum scRNA-seq analysis. In this step, we get to know the quality of our data by plotting various parameters and choosing appropriate cell filtering thresholds accordingly. We also output several gene lists that will be useful for future analyses.
+
+Sample nomenclature is as follows:
+
+* PBMC1 = peripheral blood mononuclear cells collected from Pig 1
+* PBMC2 = peripheral blood mononuclear cells collected from Pig 2
+
+### Load required software packages
+
+We will output the corrected count matrices (with non-expressed genes and poor quality cells removed) into the same format as Cell Ranger by utilizing the DropletUtils package (Lun et al. 2019; Griffiths et al. 2018), thus generating new barcodes.tsv.gz, features.tsv.gz, matrix.mtx.gz files for each sample. We also begin utilizing the Seurat package (Stuart and Butler et al. 2019) for organizing our data into Seurat objects. Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: dplyr (Wickham et al. 2020), ggplot2 (Wickham 2016), matrixStats (Bengtsson 2020), tidyr (Wickham 2020), writexl (Ooms 2020)
+
+```{r, message = FALSE}
+library(dplyr) 
+library(DropletUtils) 
+library(ggplot2) 
+library(matrixStats) 
+library(Seurat) 
+library(tidyr) 
+library(writexl) 
+```
+
+## Create count matrix, metadata, and phenotype data files
+
+### Specify paths to output files from each sample that have had ambient RNA removed
+
+```{r, warning = FALSE, error = FALSE}
+data_dir <- c(PBMC1 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/SoupX/PBMC1strainedCounts",
+              PBMC2 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/SoupX/PBMC2strainedCounts")
+library_id <- c("PBMC1", "PBMC2") 
+lapply(data_dir, dir) # Should show barcodes.tsv.gz, genes.tsv.gz, and matrix.mtx.gz for each sample listed
+```
+
+### Read all samples into a data matrix and create a Seurat object
+
+```{r, warning = FALSE, error = FALSE}
+scRNA_data <- Read10X(data.dir = data_dir) # read the 10X data from all samples into a data matrix
+seurat_object = CreateSeuratObject(counts = scRNA_data) # create a Seurat object of the data matrix
+```
+
+### Create a dataframe with cell phenotype data information (pDat)
+
+Create a dataframe of the cell barcodes called pDat:
+
+```{r, warning = FALSE, error = FALSE}
+pDat <-data.frame(barcode = colnames(seurat_object)) 
+```
+
+Add Sample IDs to pDat dataframe:
+
+```{r, warning = FALSE, error = FALSE}
+pDat$SampleID <- gsub("([^_]+).+", "\\1", pDat$barcode, perl = TRUE) 
+```
+
+Add barcode IDs to pDat dataframe:
+
+```{r, warning = FALSE, error = FALSE}
+pDat$BarBak <- pDat$barcode # make new column called BarBak with same entries as barcode column
+pDat <- pDat %>% separate(BarBak, c("Sam","Loupe")) # separate BarBak entries into sample ID ("Sam") and barcode ID ("Loupe")
+pDat <- pDat[,-3] # remove Sam column
+for (i in seq_along(library_id)){ 
+  pDat$Loupe <- ifelse(pDat$SampleID == library_id[i], paste0(pDat$Loupe, paste0("-",i)), pDat$Loupe)
+} # Add -# suffix to end of Loupe column entries, corresponding to sample order in library_id. We will need these to correspond with barcodes in the .cloupe file from CellRanger outputs in order to later edit data for Loupe Cell Browser
+```
+
+Make Loupe barcodes the rownames of pDat:
+
+```{r, warning = FALSE, error = FALSE}
+rownames(pDat) <- pDat$Loupe # make Loupe barcodes the rownames of pDat
+```
+
+Here's what pDat looks like now:
+
+```{r, warning = FALSE, error = FALSE}
+tail(pDat, n = 3)
+```
+
+Make sure barcode IDs aren't ever duplicated:
+
+```{r, warning = FALSE, error = FALSE}
+table(duplicated(pDat$Loupe)) 
+```
+
+Finally, check the number of cells coming from each sample in pDat:
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID)
+```
+
+### Create a count matrix (cDat)
+
+Create a new count matrix were columns correspond to cells and rows correspond to genes:
+
+```{r, warning = FALSE, error = FALSE}
+cDat <-  as.matrix(GetAssayData(object = seurat_object, slot = 'counts')) # create a new counts matrix; columns = cells & rows = genes
+dim(cDat)	# check number of genes x number of cells
+```
+
+### Filter out non-expressed genes
+
+```{r, warning = FALSE, error = FALSE}
+keep <- rowSums(cDat) > 0 # specify rows with genes that have no expression across all cells of the dataset
+cDat <- cDat[keep,]  # keep only genes that have > 0 transcript total across all cells of the dataset
+dim (cDat)	# check number of genes x number of cells after gene filtering
+```
+
+### Create a dataframe with feature data (fDat)
+
+Create a dataframe of the cell features (genes) called fDat:
+
+```{r, warning = FALSE, error = FALSE}
+fDat <- data.frame(ID = rownames(cDat)) # create a dataframe of the filtered genes
+rownames(fDat) <- fDat$ID # make genes the row names of dataframe
+```
+
+Here's what fDat looks like now:
+
+```{r, warning = FALSE, error = FALSE}
+head(fDat, n = 3) # dataframe should look like this:
+```
+
+### Organize gene symbol information
+
+```{r, warning = FALSE, error = FALSE}
+con <- gzfile(file.path(data_dir[1], "features.tsv.gz")) # locate features.tsv path from any single CellRanger output sample 
+ssc_genes <- read.delim(con, sep = "\t", header = FALSE, as.is = TRUE)[, 1:2] # create dataframe of gene names without (column 1) and with (column 2) gene symbols appended to Ensembl IDs
+colnames(ssc_genes) <- c("CellRanger", "Dashed") # change column names
+ssc_genes$Dashed<- gsub("_", "-", ssc_genes$Dashed, perl = TRUE) # replace underscores with dash in 'Symbol' column entries
+```
+
+Here's what ssc_genes looks like now:
+
+```{r, warning = FALSE, error = FALSE}
+head(ssc_genes, n = 3)
+```
+
+Name our genes based on either the given gene symbol or Ensembl ID based on the following criteria:
+
+* If no gene symbol is available, assign Ensembl ID as our gene name
+* If gene symbol is present but used for multiple Ensembl IDs, assign Ensembl ID as our gene name
+* If gene symbol is present and only one Ensembl ID corresponds to that symbol, assign gene symbol as our gene name
+
+```{r, warning = FALSE, error = FALSE}
+ssc_genes$Symbol <- sub("_.*", "", ssc_genes$CellRanger) # create column with only gene symbols. If no symbol, use EnsemblID
+ssc_genes$EnsemblID <- sub(".*_", "", ssc_genes$CellRanger) # create column with only EnsemblID
+ssc_genes$Duplicated <- duplicated(ssc_genes$Symbol) | duplicated(ssc_genes$Symbol, fromLast = TRUE) # create column indicating whether each gene symbol corresponds to multiple EnsemblIDs (is found in more than 1 row)
+ssc_genes$Name <- ifelse(ssc_genes$Duplicated == "TRUE", ssc_genes$EnsemblID, ssc_genes$Symbol) # create official gene names according to criteria bullet-pointed above
+```
+
+### Add additional gene information (ssc_genes) to our feature dataframe (fDat)
+
+```{r, warning = FALSE, error = FALSE}
+fDat <- merge(fDat, ssc_genes, by.x ="row.names", by.y = "Dashed", all.x =TRUE, sort = FALSE) # merge fDat and ssc_genes dataframes together
+rownames(fDat) <- fDat[, 1] # 1st column of dataframe becomes row names
+fDat <- fDat[, -1] # remove 1st row of dataframe
+```
+
+Here's what fDat looks like now:
+
+```{r, warning = FALSE, error = FALSE}
+head(fDat, n = 3)
+```
+
+### Extract mitochondrial gene information and add to fDat
+
+Requires download, unzipping, and import of Sus_scrofa.Sscrofa11.1.97.gtf.gz annotation:
+
+```{r, warning = FALSE, error = FALSE}
+gtf <- "/home/Jayne.Wiarda/scRNAseqIleumAtlas/SS_annotation/Sus_scrofa.Sscrofa11.1.97.gtf" # specify file path to Sus scrofa 11.1 version 100 annotation file
+```
+
+Identify mitochondrial genes and add to feature data (fDat):
+
+```{r, warning = FALSE, error = FALSE}
+mitoGenes <-  system2("grep", args = c('^MT', gtf, "| grep -o 'ENSSSCG[0-9]*' | uniq"), stdout = TRUE) # extract mitochondrial gene information from annotation file
+fDat$Mitochondrial <- fDat$EnsemblID %in% mitoGenes # add column of mitochondrial gene information to fDat
+length(mitoGenes) # see that we have 37 mitochondrial genes
+table(fDat$Mitochondrial) # see that we have the same amount of "TRUE" mito genes as in our mitoGenes list (37 genes)
+```
+
+Here's what fDat looks like now:
+
+```{r, warning = FALSE, error = FALSE}
+head(fDat, n = 3) # dataframe should look like this: 
+```
+
+### Adjust gene and cell barcode names in the counts matrix (cDat):
+
+```{r, warning = FALSE, error = FALSE}
+all(rownames(cDat) == rownames(fDat)) # make sure genes that are rownames in cDat are in same exact order in fDat rows
+rownames(cDat) <- fDat$Name # change cDat rownames (genes) to fDat gene names
+all(colnames(cDat) == pDat$barcode) # make sure barcodes that are column names in cDat are in same exact order by row in pDat barcodes column
+colnames(cDat) <- pDat$Loupe # change cDat column names to pDat Loupe barcodes
+```
+
+## Assess the quality of our data
+
+### Assess single-cell sequencing depths and number of genes detected:
+
+```{r, warning = FALSE, error = FALSE}
+pDat$UmiSums<- colSums(cDat) # find the total unique reads detected per cell
+pDat$GenesDetected <- colSums(cDat!=0) # find the total number of genes detected per cell
+```
+
+Create a violin plot of the number of total genes detected per cell in each sample:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(pDat, aes(x=SampleID, y=GenesDetected, fill= SampleID)) + 
+  geom_violin(draw_quantiles=0.5)+
+  ylab("Total number of genes detected")
+```
+
+Create a violin plot of the number of unique reads (UMIs) detected per cell in each sample:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(pDat, aes(x=SampleID,y=UmiSums, fill=SampleID)) + 
+  geom_violin(draw_quantiles=0.5)+
+  ylab("Total number of molecules(depth)")
+```
+
+### Plot 50 most highly expressed genes:
+
+Calculate the percentage of total expression for each gene in each cell:
+
+```{r, warning = FALSE, error = FALSE}
+mRel <- t(t(cDat)/colSums(cDat)) 
+table(colSums(mRel)) # QC check: should all total 1
+rownames(mRel)  <- fDat$ID # assign rownames
+```
+
+Find median expression level to see library size-normalized expression:
+
+```{r, warning = FALSE, error = FALSE}
+topExpressed <- rowMedians(mRel) 
+names(topExpressed) <- rownames(mRel) # assign corresponding gene names to median expression values
+topExpressed <- topExpressed %>% sort(.,decreasing=TRUE) %>% names # sort gene names according to highest to lowest median library-normalized expression
+```
+
+Plot the top 50 most expressed genes with mitochondrial gene information included:
+
+```{r, warning = FALSE, error = FALSE}
+plotData <- t(mRel)[,topExpressed[1:50]] %>% reshape2::melt() %>% # create dataframe of top 50 expressed genes individual cell expression levels
+  dplyr::rename(Cell=Var1, Gene=Var2, RelativeExpression=value)
+plotData <- merge(plotData, fDat, by.x = "Gene", by.y = "ID", all.x = TRUE) # Add mitochondrial gene information for top 50 expressed genes
+head(plotData, n = 3) # dataframe should look like this:
+ggplot(plotData, aes(x=Gene, y=RelativeExpression, color= Mitochondrial)) + 
+  geom_boxplot() +     
+  coord_flip() +     
+  theme_bw()
+```
+
+### Plot 50 most frequently expressed genes:
+
+Calculate the percentage of cells expressing each gene:
+
+```{r, warning = FALSE, error = FALSE}
+freqOfExp <- cDat!=0 # list only genes with non-zero expression and how many cells express the gene
+rownames(freqOfExp) <- fDat$ID # make a table of whether or not a gene is expressed in each cell
+freqOfExp <- sort(rowSums(freqOfExp)/ncol(freqOfExp),decreasing=TRUE) # list percentages of cells expressing a gene, from highest to lowest
+head(freqOfExp, n = 3) # should look like this:
+```
+
+Plot the top 50 most expressed genes with mitochondrial gene information included:
+
+```{r, warning = FALSE, error = FALSE}
+plotData <- data.frame("Gene"=names(freqOfExp),"Frequency"=freqOfExp) # create dataframe of gene names and frequencies
+plotData <- merge(plotData, fDat, by.x = "Gene", by.y = "ID", all.x = TRUE, sorted =FALSE) # add mitochodrial gene information
+plotData <- plotData[order(plotData$Frequency, decreasing= TRUE), ] # sort from highest to lowest frequency
+ggplot(plotData[1:50,], aes(x=factor(Gene,levels=Gene), y=Frequency, color= Mitochondrial)) + 
+  geom_bar(stat="identity", fill ="white") +
+  coord_flip() +     
+  xlab("Gene") +     
+  theme_bw()
+```
+
+### Assess cell quality:
+
+Assess cell quality based on percent mitochondrial reads and sequencing depth (number of genes or UMIs detected per cell):
+
+```{r, warning = FALSE, error = FALSE}
+mMito <- cDat[fDat$Mitochondrial,] # extract read count of only mitochondrial genes
+pDat$prcntMito <- colSums(mMito)/colSums(cDat) # add column of % mitochondrial gene expression for each cell
+theme_set(theme_grey()) # set plot theme
+ggplot(pDat, aes(x=prcntMito, y=GenesDetected, color = SampleID))+
+  geom_point() + 
+  facet_wrap(~SampleID, nrow =1)+
+  theme_get() + 
+  ylab("#Genes detected per cell")
+```
+
+Assess cell quality based on the percentage of top 50 frequently expressed genes versus number of genes detected per cell:
+
+```{r, warning = FALSE, error = FALSE}
+idtop <- fDat[fDat$Name %in% names(freqOfExp)[1:50],"ID"] # get IDs of top 50 most frequently expressed genes
+mTop <- cDat[idtop,]!=0 # Print TRUE/FALSE expression of top 50 genes alone; rows = top 50 genes expression, columns = all cells
+pDat$prcntTop <- colSums(mTop)/50 # calculate percentage/frequency of expression of top 50 genes in all cells. colsum is sum of reads on these top50 genes in each cell (column wise) divided by 50 
+theme_set(theme_grey()) # set plot theme
+ggplot(pDat, aes(x=prcntTop, y=GenesDetected, color = SampleID))+ 
+  geom_point() + 
+  facet_wrap(~SampleID, nrow =1) +
+  theme_get()
+```
+
+### Check for barcode duplications:
+
+```{r, warning = FALSE, error = FALSE}
+pDat$DuplicatedBarcodes <- duplicated(rownames(pDat)) | duplicated(rownames(pDat), fromLast = TRUE)
+table(pDat$DuplicatedBarcodes) 
+```
+
+## Establish QC thresholds
+
+### Look at histograms to determine if there are obvious cutoff values:
+
+Plot % mitochondrial reads to find good cutoff value for QC filtering. 12.5% mitochodrial reads looks like a good cutoff.
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(pDat, aes(x=prcntMito,y=..density..)) + 
+  geom_histogram(fill="white",color="black",bins=500) + 
+  scale_x_continuous(breaks = seq(0, .5, .025), lim = c(0, .5)) + 
+  ylim(0,30) +
+  facet_wrap(~SampleID) +
+  geom_vline(aes(xintercept=.125),color="red",lty="longdash") + # move this cutoff line where you see fit
+  RotatedAxis()
+```
+
+Plot number of genes detected per cell to find a good cutoff value for QC filtering. 550 genes detected looks like a good cutoff.
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(pDat, aes(x=GenesDetected,y=..density..)) + 
+  geom_histogram(fill="white",color="black",bins=500) + 
+  scale_x_continuous(breaks = seq(0, 2000, 250), lim = c(0, 2000)) + 
+  RotatedAxis() +
+  geom_vline(aes(xintercept=550),color="red",lty="longdash") + # move this cutoff line where you see fit
+  facet_wrap(~SampleID) 
+```
+
+Plot number of UMIs per cell to find a good cutoff value for QC filtering. 1,250 UMIs looks like a good cutoff.
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(pDat, aes(x=UmiSums,y=..density..)) + 
+  geom_histogram(fill="white",color="black",bins=500) + 
+  scale_x_continuous(breaks = seq(0, 5000, 250), lim = c(0, 5000)) + 
+  RotatedAxis() +
+  geom_vline(aes(xintercept=1250),color="red",lty="longdash") + # move this cutoff line where you see fit
+  facet_wrap(~SampleID)
+```
+
+## Perform cell filtering
+
+### Perform cell filtering based on cutoffs outlined above:
+
+```{r, warning = FALSE, error = FALSE}
+pDat <- mutate(pDat, 
+               PassViability=prcntMito < 0.125, # only include cells with total mitochondrial reads under 12.5%
+               PassGenesDet=GenesDetected > 550, # only consider cells with total genes detected more than 550
+               PassLibSize=UmiSums > 1250, # only consider cells with greater than 1250 total UMIs
+               PassBarcodeFreq=DuplicatedBarcodes==FALSE, # only consider cells with non-repeated barcodes
+               PassAll= PassViability & PassGenesDet & PassLibSize & PassBarcodeFreq) # list whether or not cells pass all filtering criteria
+rownames(pDat) <- pDat$Loupe # make sure the pDat rownames correspond to Loupe barcodes!
+```
+
+### Look at the number of cells removed from each sample based on each filtering criterion:
+
+How many cells had at least 550 genes detected?
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID,pDat$PassGenesDet) 
+```
+
+How many cells had at least 1250 UMIs detected?
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID,pDat$PassLibSize) 
+```
+
+How many cells had less than 12.5% mitochondrial reads?
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID,pDat$PassViability)  
+```
+
+How many cells had non-repeated barcodes?
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID,pDat$PassBarcodeFreq)  
+```
+
+How many cells passed all filtering criteria?
+
+```{r, warning = FALSE, error = FALSE}
+table(pDat$SampleID,pDat$PassAll)
+```
+
+## Save the data
+
+### Save unfiltered data:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+stopifnot(identical(as.character(rownames(pDat)),colnames(cDat)))
+stopifnot(identical(as.character(fDat$Name),rownames(cDat)))
+out <- list()
+out[["counts"]] <- cDat
+out[["phenoData"]] <- pDat
+out[["featureData"]] <- fDat
+saveRDS(out,file=file.path("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/", "PBMC_QC.rds")) # this saves all of our information before filtering out low quality cells
+write.table(fDat, 
+            file = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/GeneInfo.txt") # export the feature information separately...this will come in handy later
+write_xlsx(x = fDat, 
+           path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/GeneInfo.xlsx", # export the feature information separately...this will come in handy later
+           col_names = TRUE) # this is the file used for cluster-specific cell type 
+write.table(ssc_genes, 
+            file = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/UnfilteredGeneInfo.txt") # export the feature information separately...this will come in handy later
+write_xlsx(x = ssc_genes, 
+           path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/UnfilteredGeneInfo.xlsx", # export the feature information separately...this will come in handy later
+           col_names = TRUE) # this is the file used for cluster-specific cell type 
+```
+
+### Save filtered data:
+
+Filter poor quality cells and non-expressed genes from counts matrix (cDat):
+
+```{r, warning = FALSE, error = FALSE}
+cDat <- cDat[,pDat$PassAll] # keep only cells that passed all criteria in QC
+dim(cDat) 
+pDat <- pDat[pDat$PassAll,]
+dim(pDat) 
+```
+
+Subset data by sample ID:
+
+```{r, warning = FALSE, error = FALSE}
+All <- CreateSeuratObject(counts = cDat, meta.data = pDat) # create Seurat object of filtered data
+Idents(All) <- "SampleID" # change identities to sample IDs
+PBMC1 <- subset(All, ident = "PBMC1") 
+PBMC2 <- subset(All, ident = "PBMC2")
+```
+
+Save filtered data for each sample:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+write10xCounts(x = PBMC1@assays$RNA@counts, path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/PBMC1onlyFilteredQC", version = "3") 
+write10xCounts(x = PBMC2@assays$RNA@counts, path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/PBMC2onlyFilteredQC", version = "3")
+```
+
+In total, we have generated count matrices for each individual sample that have had ambient RNA, non-expressed genes, and poor quality cells removed.
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Henrik Bengtsson (2020). matrixStats: Functions that Apply to Rows and Columns of Matrices (and to Vectors). R package version 0.57.0. https://CRAN.R-project.org/package=matrixStats
+  
+Griffiths JA, Richard AC, Bach K, Lun ATL, Marioni JC (2018). “Detection and removal of
+barcode swapping in single-cell RNA-seq data.” _Nat. Commun._, *9*(1), 2667. doi:
+10.1038/s41467-018-05083-x (URL: https://doi.org/10.1038/s41467-018-05083-x).
+
+Lun ATL, Riesenfeld S, Andrews T, Dao T, Gomes T, participants in the 1st Human Cell Atlas
+Jamboree, Marioni JC (2019). “EmptyDrops: distinguishing cells from empty droplets in
+droplet-based single-cell RNA sequencing data.” _Genome Biol._, *20*, 63. doi:
+10.1186/s13059-019-1662-y (URL: https://doi.org/10.1186/s13059-019-1662-y).
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2. https://CRAN.R-project.org/package=tidyr
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

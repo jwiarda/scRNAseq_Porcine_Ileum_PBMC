@@ -1,0 +1,285 @@
+---
+title: "Comparison of ILCs from Gut & Periphery: Data Merging, Subsetting, Normalization, Integration, & Dimensionality Reduction"
+author: "Jayne Wiarda"
+date: "24Jun2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+At this point, we've identified ILCs in both the porcine ileum and in porcine PBMCs. To compare these cells further, we need to combine ILCs from our ileum & PBMCs into a single dataset.
+
+For this section, we will merge, subset, and re-process cells that were identified as ILCs in either ileum or PBMCs.
+
+## Data Merging, Subsetting, Normalization, Integration, & Dimensionality Reduction
+
+### Load required software packages
+
+The following analyses are conducted primarily using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). To run some of these functions more quickly, we also utilize parallelization with the software package, future (Bengtsson 2020). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: ggplot2 (Wickham 2016), writexl (Ooms 2020), scales (Wickham & Seidel 2020)
+
+```{r, message = FALSE}
+library(Seurat)  
+library(writexl)        
+library(scales)
+library(ggplot2)
+library(future)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work and slim down to the bare bones of the Seurat objects:
+
+PBMCs (2 samples):
+
+```{r, warning = FALSE, error = FALSE}
+pbmc <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Seurat/PBMC.rds")
+pbmc <- DietSeurat(pbmc, 
+                 assays = "RNA", 
+                 dimreducs = NULL, 
+                 graphs = NULL,
+                 scale.data = FALSE) # get rid of all the extra stuff we no longer need
+Idents(pbmc) <- pbmc$seurat_clusters
+```
+
+Ileum (6 samples): 
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll_FINALannot.rds")
+il <- DietSeurat(il, 
+                 assays = "RNA", 
+                 dimreducs = NULL, 
+                 graphs = NULL,
+                 scale.data = FALSE) # get rid of all the extra stuff we no longer need
+Idents(il) <- il$seurat_clusters
+```
+
+### Allow parallelization 
+
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+### Merge data
+
+Merge together Seurat objects from ileum and PBMCs:
+
+```{r, warning = FALSE, error = FALSE}
+merged <- merge(pbmc, 
+                il, 
+                add.cell.ids = c('pbmc', 'ileum')) # merge ileum and pbmc data together
+Idents(merged) <- merged$seurat_clusters 
+levels(Idents(merged))
+```
+
+### Subset data
+
+Create a subset of data containing only CD4 T cells:
+
+```{r, warning = FALSE, error = FALSE}
+ILC <- subset(merged, # subset merged data down to just ILC cluster we identified
+              idents = c('p0', 'p4', 'p26', 'p28', 'p30', '1', '18', '43', '44', '53'))
+```
+
+### Remove unnecessary data
+
+Identify genes with non-zero expression to keep:
+
+```{r, warning = FALSE, error = FALSE}
+counts <- as.data.frame(ILC[['RNA']]@counts) # extract counts matrix
+genes <- subset(rownames(counts), rowSums(counts) > 0) # identify genes expressed in dataset
+```
+
+Slim down our Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+ILC <- DietSeurat(ILC,
+                  features = genes) # remove all genes that aren't expressed by any of the cells
+```
+
+Free up space by removing all object other than ILC Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+rm(list=setdiff(ls(), c("ILC"))) # clear up space by deleting objects no longer needed
+```
+
+### Re-normalize the data
+
+Re-perform SCTransform on each individual sample:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+ILC.list <- SplitObject(ILC, split.by = "SampleID") # split by sample IDs
+ILC.list <- ILC.list[c("IPP1", "IPP2", "NoPP1", "NoPP2", "X2I1", "X2I2", "PBMC1", "PBMC2")] # specify preferred order
+for (i in 1:length(ILC.list)) { # normalize data using SCTransform method
+  ILC.list[[i]] <- SCTransform(ILC.list[[i]], 
+                               return.only.var.genes = FALSE, 
+                               verbose = TRUE) 
+}
+```
+
+### Re-integrate the data
+
+Re-integrate samples based on re-calculated SCT assays:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+ILC.features <- SelectIntegrationFeatures(ILC.list, # select the genes to use for integration
+                                          verbose = TRUE) 
+ILC.list <- PrepSCTIntegration(ILC.list, 
+                               anchor.features = ILC.features,
+                               verbose = TRUE)
+ILC.anchors <- FindIntegrationAnchors(ILC.list, # identify anchors for integration from top 30 PCs
+                                      normalization.method = "SCT", 
+                                      anchor.features = ILC.features, 
+                                      dims = 1:30)
+ILC.integrated <- IntegrateData(ILC.anchors, # integrate data
+                                normalization.method = "SCT", 
+                                dims = 1:30)
+```
+
+### Re-run PCA analysis
+
+Calculate the PCs of the integrated dataset:
+
+```{r, warning = FALSE, error = FALSE, messge = FALSE}
+ILC.integrated <- RunPCA(ILC.integrated, # run PCA analysis for 100 dimensions of the data
+                         npcs = 100, 
+                         verbose = TRUE) 
+```
+
+Visualize our PCs in an elbow plot:
+
+```{r, warning = FALSE, error = FALSE}
+ElbowPlot(ILC.integrated,
+          ndims = 100) # look at this plot to find the 'elbow' for significant PCs... use this number of PCs for creating UMAP, tSNE, & cell neighbors & clustering
+```
+
+Quantitiatively calculate how many PCs to use:
+
+```{r, warning = FALSE, error = FALSE}
+pct <- ILC.integrated[["pca"]]@stdev / sum(ILC.integrated[["pca"]]@stdev) * 100 # find standard deviation for each PC
+cumu <- cumsum(pct) # find cumulative percentages for PCs
+co1 <- which(cumu > 90 & pct < 5)[1] # find PC representing cumulative percent >90% and less than 5% associated with the single PC
+co1 # list PC
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1 # find last PC where change in percent variation is more than 0.1%
+co2 # list PC
+pcs <- min(co1, co2) # find the minimum PC from the 2 methods used above
+pcs # list PC
+```
+
+Plot our findings:
+
+```{r, warning = FALSE, error = FALSE}
+plot_df <- data.frame(pct = pct, # put PC values into dataframe for plotting
+                      cumu = cumu, 
+                      rank = 1:length(pct))
+ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + # visualize PCs to use in elbow plot
+  geom_text() + 
+  geom_vline(xintercept = 90, color = "grey") + 
+  geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+  theme_bw()
+```
+
+Store information for PCs to use in future computations:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:pcs
+PCdims
+```
+
+### Construct UMAP and t-SNE plots
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+ILC.integrated <- RunUMAP(ILC.integrated, 
+                          dims = PCdims, 
+                          reduction = "pca", 
+                          assay = "SCT") # create UMAP
+ILC.integrated <- RunTSNE(ILC.integrated, 
+                          dims = PCdims, 
+                          reduction = "pca", 
+                          assay = "SCT") # create tSNE plot (if desired)
+```
+
+Plot UMAP:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ILC.integrated,
+        reduction = 'umap',
+        group.by = 'SampleID')
+```
+
+Plot t-SNE:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ILC.integrated,
+        reduction = 'tsne',
+        group.by = 'SampleID')
+
+DimPlot(ILC.integrated,
+        reduction = 'tsne',
+        group.by = 'SampleID',
+        cols = c(rep('navy', 4), rep('red',2), rep('navy', 2)))
+
+DimPlot(ILC.integrated,
+        reduction = 'tsne',
+        group.by = 'cellID')
+DimPlot(ILC.integrated,
+        reduction = 'tsne',
+        group.by = 'seurat_clusters')
+```
+
+### Add normalized and scaled data to the RNA assay
+
+At this point, our Seurat object has three 'assays', where we store counts information. The SCT assay has counts normalized and scaled with SCTransform, the integration assay has counts data used to integrate data, and the RNA assay, which at this point, still needs to be normalized and scaled.
+
+Since it's still recommended to use RNA counts rather than SCT counts for many downstream analyses, we need to normalize and scale our raw RNA counts.
+
+Normalize the RNA data with standard log normalization:
+
+```{r, warning = FALSE, error = FALSE}
+ILC.integrated <- NormalizeData(ILC.integrated,  # normalize the RNA counts data per cell
+                     normalization.method = "LogNormalize", 
+                     scale.factor = 10000, 
+                     assay = "RNA")
+```
+
+Scale the RNA data: 
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+ILC.integrated <- ScaleData(ILC.integrated, # scale the RNA counts data relative to other cells
+                 assay = "RNA")
+```
+
+See that we now have scaled RNA data:
+
+```{r, warning = FALSE, error = FALSE}
+dim(ILC.integrated[["RNA"]]@scale.data) 
+```
+
+### Save the Seurat object:
+
+Now, importantly, we save our Seurat object as an .rds. We will end up importing the .rds back into R for many downstream analyses.
+
+```{r, warning = FALSE, error = FALSE}
+DefaultAssay(ILC.integrated) <- 'RNA'
+saveRDS(ILC.integrated, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/MergedILCs/Seurat/GutBlood_IntegratedILCs.rds') # save .rds file
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales

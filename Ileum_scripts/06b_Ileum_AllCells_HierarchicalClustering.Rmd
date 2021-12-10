@@ -1,0 +1,132 @@
+---
+title: "Characterization of Ileal Cells: Hierarchical Clustering"
+author: "Jayne Wiarda"
+date: "31Mar2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed scRNA-seq data from six porcine ileum samples through general data QC and pre-processing steps. At this point, we can start digging into the data more in order to form some biological interpretations! By the end of this analysis, we will be able to classify our cells into some general lineage designations, and we will also be able to see some biological differences occurring between different sample types. We will also be able to output lists of genes differentially expressed amongst clusters.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+Analyses are divided into sections as follows, and only one of these components is specified and included below:
+
+* General characterization of the data, where we visualize various metrics for our cells and/or clusters
+* Hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+* Cluster-based differential gene expression analysis to determine genes differentially expressed in a cluster relative to the rest of the dataset (cluster-based overall DGE) or in one cluster relative to another (cluster-based pairwise DGE)
+* Cluster-based pseudobulk correlation as another method to assess similarity/dissimilarity between pairwise cluster combinations
+* Tissue composition comparisons, to determine differences in the compositions of different cells and/or transcripts across different ileal sample types
+* Sample-specific quality comparisons, where we assess the whole transcriptomic profiles from each sample
+* Cluster-based gene set enrichment analysis, where we calculate enrichment of signatures for sorted immune cell populations from bulk RNA-seq datasets within our single-cell dataset
+
+This file specifically goes over hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+
+## Hierarchical clustering of cell clusters
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(il) <- il$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:19
+```
+
+### Calculate hierarchical clustering
+
+Build a phylogenetic tree, utilizing seurat_clusters as our groups and using the pre-determined significant number of PCs to specify the dimensionality of our data to use:
+
+```{r, warning = FALSE, error = FALSE}
+il <- BuildClusterTree(il, 
+                       dims = PCdims, 
+                       assay = "PCA")
+```
+
+Now let's look at our cluster tree:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+PlotClusterTree(il, 
+                edge.width = 3) # plot tree with node labels
+```
+
+Let's remove node labels and plot the tree again:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- Tool(object = il, 
+                  slot = "BuildClusterTree") 
+ape::plot.phylo(x = data.tree, 
+                direction = "downwards", # plot the tree without node labels
+                edge.width = 1.5)
+```
+
+Let's reorder some of the branches while still maintaining our heirarchy:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- ape::rotateConstr(data.tree, c('36', '45', '50', '42', '49', '52', 
+                                            '43', '51', '35', '23', '32', '53', '1', 
+                                            '18', '44', '6', '34', '7', '14', '3', '37', 
+                                            '47', '17', '24', '15', '31', '29', '26', '12',
+                                            '41', '46', '19', '10', '0', '4', '21', '11', '38', '30',
+                                            '13', '9', '33', '25', '48', '27', '28', '2',
+                                            '20', '8', '5', '22', '16', '40', '39'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+For future analyses, we may want to order our clusters by this phylogenetic order, so let's store that information in a metadata slot for our Seurat object, called 'phyloorder':
+
+```{r, warning = FALSE, error = FALSE}
+levels(il) <- rev(c('36', '45', '50', '42', '49', '52', 
+                '43', '51', '35', '23', '32', '53', '1', 
+                '18', '44', '6', '34', '7', '14', '3', '37', 
+                '47', '17', '24', '15', '31', '29', '26', '12',
+                '41', '46', '19', '10', '0', '4', '21', '11', '38', '30',
+                '13', '9', '33', '25', '48', '27', '28', '2',
+                '20', '8', '5', '22', '16', '40', '39')) 
+il$phyloorder <- Idents(il)
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(il, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

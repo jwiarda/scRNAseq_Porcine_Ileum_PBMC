@@ -1,0 +1,130 @@
+---
+title: "Characterization of Ileal Myeloid Lineage Leukocytes: Visualizing Prediction & Mapping Results"
+author: "Jayne Wiarda"
+date: "15Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created a data subset consisting of only myeloid lineage leukocytes. Let's now overlay preference-based prediction & mapping information back onto our myeloid data.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+## Visualizing reference-based cell predictions and mapping
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020)
+
+```{r, message = FALSE}
+library(Seurat)  
+library(scales)
+library(ggplot2)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilM <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_MyeloidOnly.rds") 
+DefaultAssay(ilM) <- "RNA"
+```
+
+### Visualize mapping scores
+
+Plot mapping scores overlaid onto our t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE, fig.width = 18}
+FeaturePlot(ilM, 
+            features = c('SsPBMC_MappingScores', 
+                         'MmIleum_MappingScores', 
+                         'HsIleum_MappingScores'),
+            reduction = 'tsne', # change to 'umap' to overlay onto UMAP plot
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('yellow', 'orange', 'red', 'red4'),  limits = c(0.5, 1), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+### Visualize selected cell type prediction scores
+
+We selected and plotted overlaid prediction scores for myeloid populations found in reference data.
+
+From murine ileum reference cell types:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 15, message = FALSE, fig.height = 11}
+FeaturePlot(ilM, 
+            features = c('MmIleum_CellType_prediction.score.pDC',
+                         'MmIleum_CellType_prediction.score.DC..CD103posCD11bpos.',
+                         'MmIleum_CellType_prediction.score.DC..CD103posCD11bneg.',
+                         'MmIleum_CellType_prediction.score.DC..CD103neg.C1.',
+                         'MmIleum_CellType_prediction.score.DC..CD103neg.C2.',
+                         'MmIleum_CellType_prediction.score.Macrophage',
+                         'MmIleum_CellType_prediction.score.Mast.cell',
+                         'MmIleum_CellType_prediction.score.Neutrophil',
+                         'MmIleum_CellType_prediction.score.Basophil'),
+            reduction = 'tsne', # change to 'umap' to overlay onto UMAP plot
+            ncol = 4) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 0.5), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+From human ileum reference cell types:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 15, message = FALSE, fig.height = 7}
+FeaturePlot(ilM, 
+            features = c('HsIleum_CellType_prediction.score.pDC',
+                         'HsIleum_CellType_prediction.score.cDC1',
+                         'HsIleum_CellType_prediction.score.cDC2',
+                         'HsIleum_CellType_prediction.score.activated.DC',
+                         'HsIleum_CellType_prediction.score.Cycling.myeloid.cells',
+                         'HsIleum_CellType_prediction.score.Macrophage',
+                         'HsIleum_CellType_prediction.score.Monocyte',
+                         'HsIleum_CellType_prediction.score.activated.mast.cells'),
+            reduction = 'tsne', # change to 'umap' to overlay onto UMAP plot
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 0.5), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+From porcine PBMC reference cell types:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 15, message = FALSE, fig.height = 7}
+FeaturePlot(ilM, 
+            features = c('SsPBMC_CellType_prediction.score.pDC',
+                         'SsPBMC_CellType_prediction.score.cDC',
+                         'SsPBMC_CellType_prediction.score.Monocytes'),
+            reduction = 'tsne', # change to 'umap' to overlay onto UMAP plot
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 0.5), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+ 
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales
+  

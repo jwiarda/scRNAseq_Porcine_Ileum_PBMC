@@ -1,0 +1,524 @@
+---
+title: "Removal of Ambient RNA from Ileum scRNA-seq Samples"
+author: "Jayne Wiarda"
+date: "28Mar2021"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We will be calculating the fraction of ambient RNA contamination, known as 'soup', for each of our scRNA-seq samples and then subtracting out those soup fractions from each cell. For this analysis, we will need raw and filtered output matrices from alignment and gene counting that was conducted using the Cell Ranger package (10X Genomics). We will also be using clustering information and t-distributed stochastic neighbor embedding (t-SNE) generated from Cell Ranger. Soup fractions will be calculated for each of six samples of ileum that were processed for scRNA-seq. 
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+### Load required software packages
+The R package, SoupX (Young & Behjati 2018), will be used to estimate and remove soup fractions from our cells, utilizing the auto-estimation method. We will output the corrected count matrices (with soup fractions removed) into the same format as Cell Ranger by utilizing the DropletUtils package (Lun et al. 2019; Griffiths et al. 2018), thus generating new barcodes.tsv.gz, features.tsv.gz, matrix.mtx.gz files for each sample. Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(DropletUtils) 
+library(ggplot2) 
+library(SoupX) 
+```
+
+## Perform ambient RNA estimation and removal on each individual sample {.tabset}
+
+### IPP1
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/IPP1/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/IPP1strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+### IPP2
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/IPP2/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/IPP2strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+### NoPP1
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/NoPP1/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/NoPP1strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+### NoPP2
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/NoPP2/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/NoPP2strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+### X2I1
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/X2I1/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/X2I1strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+### X2I2
+#### Provide file path to Cell Ranger outputs:
+```{r}
+sc = load10X('/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/X2I2/') 
+```
+
+#### Check the meta data to make sure we also have cluster information and t-SNE coordinates:
+```{r, warning = FALSE, error = FALSE}
+head(sc$metaData, n = 3)
+```
+
+#### Plot data according to Cell Ranger cluster assignments and t-SNE coordinates:
+```{r}
+dd = sc$metaData # create an object with all the metadata
+mids = aggregate(cbind(tSNE1,tSNE2) ~ clusters,data=dd,FUN=mean) # determine t-SNE coordinates for middle of each cluster
+gg = ggplot(dd,aes(tSNE1,tSNE2)) + # make a t-SNE plot
+  geom_point(aes(colour=factor(clusters)),size=0.2) +
+  geom_label(data=mids,aes(label=clusters)) 
+plot(gg) # show plot
+```
+
+#### Check expression patterns for some canonical genes:
+```{r}
+dd$CD3E = sc$toc["CD3E_ENSSSCG00000040140", ] # make column of gene expression values for CD3E (T cell gene)
+dd$IgLambdaV = sc$toc["ENSSSCG00000038719", ] # make column of gene expression values for gene that codes for Ig lambda V region (B cell gene)
+dd$CD79B = sc$toc["CD79B_ENSSSCG00000017283", ] # make column of gene expression values for CD79B (B cell gene)
+dd$FABP6 = sc$toc["FABP6_ENSSSCG00000017037", ] # make column of gene expression values for gene that codes for FABP6 (epithelial cell gene)
+dd$EPCAM = sc$toc["EPCAM_ENSSSCG00000008429", ] # make column of gene expression values for gene that codes for EPCAM (epithelial cell gene)
+dd$GNLY = sc$toc["GNLY_ENSSSCG00000008228", ] # make column of gene expression values for gene that codes for GNLY (cytotoxicty gene)
+dd$HBB = sc$toc["HBB_ENSSSCG00000014725", ] # make column of gene expression values for gene that codes for HBB (erythrocyte gene)
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD3E > 0)) # which cells express this gene?
+plotMarkerMap(sc, "CD3E_ENSSSCG00000040140") # if we assumed all cells were nothing but soup, which cells still show higher than expected expression for the gene (TRUE = expression levels higher than expected if cell was just soup, so likely real expression). This just gives us an idea of soup expression, this is NOT a formal analysis used for removing the soup RNA.
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = IgLambdaV > 0))
+plotMarkerMap(sc, "ENSSSCG00000038719")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = CD79B > 0))
+plotMarkerMap(sc, "CD79B_ENSSSCG00000017283")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = FABP6 > 0)) 
+plotMarkerMap(sc, "FABP6_ENSSSCG00000017037")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = EPCAM > 0)) 
+plotMarkerMap(sc, "EPCAM_ENSSSCG00000008429")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = GNLY > 0))
+plotMarkerMap(sc, "GNLY_ENSSSCG00000008228")
+ggplot(dd, aes(tSNE1,tSNE2)) + geom_point(aes(colour = HBB > 0))
+plotMarkerMap(sc, "HBB_ENSSSCG00000014725")
+```
+
+What we see in these plots is some misplaced gene expression, indicating we have RNA soup to remove!
+
+#### Calculate the RNA soup fraction:
+```{r, warning = FALSE, error = FALSE}
+sc = autoEstCont(sc) # estimate the fraction of RNAs belonging to soup
+out = adjustCounts(sc) # create a corrected count matrix
+```
+
+#### See which genes were most affected by our soup correction:
+```{r, warning = FALSE, error = FALSE}
+cntSoggy = rowSums(sc$toc > 0) # list cells with counts greater than 0 before correction for each gene
+cntStrained = rowSums(out > 0) # list cells with counts greater than 0 after correction for each gene
+tail(sort((cntSoggy - cntStrained)/cntSoggy), n = 10) # list the 10 most affected genes that had expression reduced in total # of cells
+tail(sort(rowSums(sc$toc > out)/rowSums(sc$toc > 0)), n = 10) # list the 10 genes that had greatest overall quantities reduced
+```
+
+#### See how soup removal affects the genes we assessed expression patterns for earlier:
+```{r, warning = FALSE, error = FALSE}
+plotChangeMap(sc, out, "CD3E_ENSSSCG00000040140")
+plotChangeMap(sc, out, "ENSSSCG00000038719")
+plotChangeMap(sc, out, "CD79B_ENSSSCG00000017283")
+plotChangeMap(sc, out, "FABP6_ENSSSCG00000017037")
+plotChangeMap(sc, out, "EPCAM_ENSSSCG00000008429")
+plotChangeMap(sc, out, "GNLY_ENSSSCG00000008228")
+plotChangeMap(sc, out, "HBB_ENSSSCG00000014725")
+```
+
+#### Save our strained count matrix to a new location:
+```{r, warning = FALSE, error = FALSE}
+write10xCounts("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/SoupX/X2I2strainedCounts", out, version = "3")
+rm(dd, gg, mids, out, sc, cntSoggy, cntStrained)
+```
+
+## {-}
+### View session information
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+Lun ATL, Riesenfeld S, Andrews T, Dao T, Gomes T, participants in the 1st Human Cell Atlas
+Jamboree, Marioni JC (2019). “EmptyDrops: distinguishing cells from empty droplets in
+droplet-based single-cell RNA sequencing data.” _Genome Biol._, *20*, 63. doi:
+10.1186/s13059-019-1662-y (URL: https://doi.org/10.1186/s13059-019-1662-y).
+
+Griffiths JA, Richard AC, Bach K, Lun ATL, Marioni JC (2018). “Detection and removal of
+barcode swapping in single-cell RNA-seq data.” _Nat. Commun._, *9*(1), 2667. doi:
+10.1038/s41467-018-05083-x (URL: https://doi.org/10.1038/s41467-018-05083-x).
+
+Young, M.D., Behjati, S. (2018). SoupX removes ambient RNA contamination from droplet based single-cell RNA sequencing data. bioRxiv, 303727

@@ -1,0 +1,275 @@
+---
+title: "Annotation of CD4 T cells"
+author: "Jayne Wiarda"
+date: "26May2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed non-naive CD4 ab T cells from porcine ileum using three methods: cell clustering (and accompanying DGE and hierarchical clustering analyses), topic modeling, and multidimensional DGE analysis. Based on these results, we create final annotations for our cells in this script.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019), ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020), dplyr (Wickham et al. 2020), readxl (Wickham & Bryan 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(readxl)
+library(fastTopics)
+```
+
+### Import relevant data
+
+Read in our Seurat object from previous analysis:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_CD4Tonly.rds')
+Idents(il) <- il$seurat_clusters
+```
+
+## Visualize our cell clusters and their relationships
+
+Start by re-visualizing clusters on a t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        reduction = 'tsne', 
+        group.by = 'neworder',
+        label = TRUE)
+```
+
+Then re-construct cluster heirarchy:
+
+```{r, warning = FALSE, error = FALSE}
+data.tree <- Tool(object = il, 
+                  slot = "BuildClusterTree") 
+data.tree <- ape::rotateConstr(data.tree, c('46', '12', '26', '41', '15'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+And also re-visualize DGE across clusters:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+DE <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/DE/CD4Tonly_OverallDE.txt')
+DE <- subset(DE, avg_logFC > 0) # only take genes enriched in the clusters 
+Idents(il) <- il$phyloorder
+topgenes <- DE %>% group_by(cluster) %>% top_n(5, avg_logFC) # only plot top 5 genes per cluster, as determined by highest average logFC values
+DoHeatmap(subset(il, downsample = 100), # take only 100 cells per cluster for plotting
+          features = as.character(topgenes$gene), 
+          assay = "RNA", 
+          disp.min = -1.5, 
+          disp.max = 3) +
+  scale_fill_gradientn(colors = c("darkturquoise", "grey90", "indianred1", "red"))
+```
+        
+## Visualize our topic model weights & multidimensional DGE gene module scores
+
+Let's read and organize the data:
+
+```{r, warning = FALSE, error = FALSE}
+fits <- readRDS('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/fastTopics/Ileum_CD4Tonly_K_3_K_10_topic_model_fits.rds') # read in all the topic models
+cellMem <- as.data.frame(fits$k3$L) # find weighted topic membership for cells when using 3 topics
+spatialMod <- as.data.frame(read_excel("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/CD4Tonly_k3_DetectionScores.xlsx", col_types = c(rep('numeric',3), 'text')))
+rownames(spatialMod) <- spatialMod$CellBarcodes
+spatialMod$CellBarcodes <- NULL
+il <- AddMetaData(il, metadata = c(cellMem, spatialMod)) # add topic membership and gene module enrichment to Seurat object
+noK <- paste0('k', 1:3)
+noMod <- paste0('GeneModule', 1:3)
+```
+
+Overlay topic weights onto t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+FeaturePlot(il, features = c(noK), 
+            reduction = 'tsne',
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('grey90', 'darkgreen'),  limits = c(0, 1), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+Overlay gene module detection scores onto t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+FeaturePlot(il, features = c(noMod), 
+            reduction = 'tsne',
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('grey90', 'red4'),  limits = c(0, 0.8), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+## Identify cycling CD4 T cells
+
+From looking at genes contributing to topics and gene modules and accompanying GO results, we can see that gene module 2 and topic 3 are enriched for genes required for cellular replication/division, and thus gene module 2 and topic 3 are higher in cycling cells. Based on this information, let's gate out cycling cells that had high topic 3 weights and/or high gene module 2 detection scores.
+
+Highlight cycling cells in red as those with gene module 2 detection scores > 0.1 and/or topic 3 weight > 0.4:
+
+```{r, warning = FALSE, error = FALSE}
+plot(il$k3, il$GeneModule2, pch = 20, col= ifelse(il$k3 > 0.4 | il$GeneModule2 > 0.1, "red", "black")) # cycling cells in red
+```
+
+Show where cycling cells are found in our t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+RepCells <- rownames(il@meta.data %>% filter(il$k3 > 0.4 | il$GeneModule2 > 0.1))
+DimPlot(il, 
+        cells.highlight = RepCells, 
+        cols.highlight = "red", 
+        sizes.highlight = 1,
+        cols = "black", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend() # cycling cells in red
+```
+
+## Identify follicular CD4 T cells
+
+Start by removing our identified cycling CD4 T cells from the dataset, so we are now only working with the remaining un-annotated cells:
+
+```{r, warning = FALSE, error = FALSE}
+il2 <- il[,!colnames(il) %in% RepCells] # only non-cycling cells
+```
+
+From looking at genes contributing to topics and gene modules and accompanying GO results, we can see that gene module 3 and topic 2 are enriched for genes typically expressed by follicle-associated CD4 T cells. Moreover, topic 1 had an inverse pattern of enrichment and was enriched for genes/processes characteristic of cell activation/effector functions. Based on this information, let's gate out follicular CD4 T cells that had higher topic 2 than topic 1 weights and/or high gene module 3 detection scores. Remaining non-follicular cells can then be classified as activated CD4 T cells.
+
+Highlight follicular cells in red as those with higher topic 2 than topic 1 weights and/or gene module 3 detection scores > 0.3:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(il2@meta.data, aes(x=k2, y=GeneModule3, color = k1)) + 
+  geom_point() + 
+  scale_colour_gradient(low='grey90', high='darkgreen') +
+  theme_classic()
+plot(il2$k2, il2$GeneModule3, pch = 20, col= ifelse(il2$k2 > il2$k1 | il2$GeneModule3 > 0.3, "red", "black"))
+```
+
+Show where follicular cells are found in our t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+FollCells <- rownames(il2@meta.data %>% filter(il2$k2 > il2$k1 | il2$GeneModule3 > 0.3))
+DimPlot(il2, 
+        cells.highlight = FollCells, 
+        cols.highlight = "red", 
+        sizes.highlight = 1,
+        cols = "black", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend() # follicular cells in red
+```
+
+## Identify activated CD4 T cells
+
+We identify the remaining CD4 T cells that were not cycling or follicular cells as activated CD4 T cells due to high weighting of topic 1 and expression of many genes assocaited with cellular activation.
+
+Show where remaining activated CD4 T cells are found in our t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+ActCells <- rownames(il2@meta.data %>% filter(!(il2$k2 > il2$k1 | il2$GeneModule3 > 0.3)))
+DimPlot(il2, 
+        cells.highlight = ActCells, 
+        cols.highlight = "red", 
+        sizes.highlight = 1,
+        cols = "black", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend() # activated cells in red
+```
+
+## Re-visualize data with new annotations
+
+Now let's add the new annotations to our meta data in the Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+bcs <- as.data.frame(colnames(il))
+colnames(bcs) <- 'barcode'
+bcs$cellID <- rep('_', nrow(bcs)) # if we left any cells un-annotated, they will show up with an ID of '_'
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% RepCells, 'Cycling CD4 ab T'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% FollCells, 'Follicular CD4 ab T'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ActCells, 'Activated CD4 ab T'))
+write.table(bcs, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/CD4T.txt') # save annotations to use later
+rownames(bcs) <- bcs$barcode
+bcs$barcode <- NULL
+il <- AddMetaData(il, metadata = bcs) # add topic membership and gene module enrichment to Seurat object
+```
+
+Let's plot new annotations in a t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        group.by = 'cellID', 
+        reduction = 'tsne', 
+        cols = c('violetred1', 'violetred4', 'pink'))
+```
+
+And let's also highlight only one cell populations at a time...
+
+Cycling CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = RepCells, 
+        cols.highlight = "violetred4", 
+        sizes.highlight = 1,
+        cols = "grey80", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Follicular CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = FollCells, 
+        cols.highlight = "pink", 
+        sizes.highlight = 1,
+        cols = "grey80", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ActCells, 
+        cols.highlight = "violetred1", 
+        sizes.highlight = 1,
+        cols = "grey80", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+### Save data
+
+Lastly, let's re-save our Seurat object with the new annotations stored in the cellID meta data slot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+Idents(il) <- il$cellID
+saveRDS(il, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_CD4Tonly.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham and Jennifer Bryan (2019). readxl: Read Excel Files. R package version 1.3.1.
+  https://CRAN.R-project.org/package=readxl
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1.
+  https://CRAN.R-project.org/package=scales
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation.
+  R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

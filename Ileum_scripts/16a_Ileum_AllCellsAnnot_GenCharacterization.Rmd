@@ -1,0 +1,1006 @@
+---
+title: "Adding cell annotations to whole dataset"
+author: "Jayne Wiarda"
+date: "30May2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created our final annotations for our data and need to add these and visualize for our whole dataset.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019), ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020), dplyr (Wickham et al. 2020), readxl (Wickham & Bryan 2019), reshape2 (Wickham 2007), ggpointdensity (Kremer 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(readxl)
+library(reshape2)
+library(ggpointdensity)
+```
+
+### Import relevant data
+
+Read in our Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA"
+Idents(il) <- il$seurat_clusters
+```
+
+Read in cell annotation files:
+
+```{r, warning = FALSE, error = FALSE}
+Bann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/B.txt')
+CD4ann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/CD4T.txt')
+gdCD8ann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/gdCD8T.txt')
+ILCann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/ILC.txt')
+```
+
+## Add cell annotations to the dataset
+
+```{r, warning = FALSE, error = FALSE}
+bcs <- as.data.frame(colnames(il))
+colnames(bcs) <- 'barcode'
+bcs$cellID <- rep('_', nrow(bcs))
+df <- as.data.frame(il$seurat_clusters)
+# Cluster-based cell annotations not provided in the annotation .txt files:
+naiveT <- rownames(subset(df, il$seurat_clusters == '24'))
+mast <- rownames(subset(df, il$seurat_clusters == '52'))
+stromal <- rownames(subset(df, il$seurat_clusters == '50'))
+ep <- rownames(subset(df, il$seurat_clusters == '36' | il$seurat_clusters == '45'))
+DC <- rownames(subset(df, il$seurat_clusters == '42'))
+mac <- rownames(subset(df, il$seurat_clusters == '49'))
+ASC <- subset(Bann, cellID == 'Antibody-secreting cells')
+B_cycling <- subset(Bann, cellID == 'Cycling B cells')
+B_resting <- subset(Bann, cellID == 'Resting B cells')
+B_transitioning <- subset(Bann, cellID == 'Transitioning B cells')
+B_nonrestingnoncycling <- subset(Bann, cellID == 'Activated B cells')
+ActivatedCD4T <- subset(CD4ann, cellID == 'Activated CD4 ab T')
+CyclingCD4T <- subset(CD4ann, cellID == 'Cycling CD4 ab T')
+FollicularCD4T <- subset(CD4ann, cellID == 'Follicular CD4 ab T')
+CD8_activated <- subset(gdCD8ann, cellID == 'Activated CD8 ab T')
+CD8_cycling <- subset(gdCD8ann, cellID == 'Cycling CD8 ab T')
+CD8_cytotoxic <- subset(gdCD8ann, cellID == 'Cytotoxic CD8 ab T')
+gd_activated <- subset(gdCD8ann, cellID == 'Activated gd T')
+gd_CD2neg <- subset(gdCD8ann, cellID == 'CD2neg gd T')
+gd_cytotoxic <- subset(gdCD8ann, cellID == 'Cytotoxic gd T')
+gd_cycling <- subset(gdCD8ann, cellID == 'Cycling gd T')
+gd_SELLpos <- subset(gdCD8ann, cellID == 'SELLhi gd T')
+ILC1 <- subset(ILCann, cellID == 'Activated group 1 ILCs')
+ILC3 <- subset(ILCann, cellID == 'Group 3 ILCs')
+ILC1_cytotoxic <- subset(ILCann, cellID == 'Cytotoxic group 1 ILCs')
+ILC1_cycling <- subset(ILCann, cellID == 'Cycling group 1 ILCs')
+
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% naiveT, 'Naive CD4/CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% mast, 'Mast cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% stromal, 'Stromal cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ep, 'Epithelial cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% DC, 'Dendritic cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% mac, 'Macrophages'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ASC$barcode, 'Antibody-secreting cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% B_cycling$barcode, 'Cycling B cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% B_resting$barcode, 'Resting B cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% B_transitioning$barcode, 'Transitioning B cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% B_nonrestingnoncycling$barcode, 'Activated B cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ActivatedCD4T$barcode, 'Activated CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CyclingCD4T$barcode, 'Cycling CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% FollicularCD4T$barcode, 'Follicular CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_activated$barcode, 'Activated CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_cycling$barcode, 'Cycling CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_cytotoxic$barcode, 'Cytotoxic CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_activated$barcode, 'Activated gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_CD2neg$barcode, 'CD2neg GD T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_cytotoxic$barcode, 'Cytotoxic gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_cycling$barcode, 'Cycling gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_SELLpos$barcode, 'SELLhi gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1$barcode, 'Activated group 1 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC3$barcode, 'Group 3 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1_cytotoxic$barcode, 'Cytotoxic group 1 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1_cycling$barcode, 'Cycling group 1 ILCs'))
+write.table(bcs, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/All.txt')
+rownames(bcs) <- bcs$barcode
+bcs$barcode <- NULL
+il <- AddMetaData(il, metadata = bcs) # add new annotations to meta data slot
+```
+
+## Visualize cell annotations on t-SNE/UMAP
+
+Rearrange the data:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(il) <- il$cellID
+levels(il) <- c('Naive CD4/CD8 ab T cells', 'Follicular CD4 ab T cells', 'Activated CD4 ab T cells', 
+                'Cycling CD4 ab T cells', 'Activated CD8 ab T cells', 'Cytotoxic CD8 ab T cells',
+                'Cycling CD8 ab T cells', 'Activated gd T cells', 'Cytotoxic gd T cells', 
+                'Cycling gd T cells', 'SELLhi gd T cells', 'CD2neg GD T cells', 'Activated group 1 ILCs',
+                'Cytotoxic group 1 ILCs', 'Cycling group 1 ILCs', 'Group 3 ILCs', 
+                'Antibody-secreting cells', 'Transitioning B cells', 'Resting B cells', 
+                'Cycling B cells', 'Activated B cells','Dendritic cells', 'Macrophages',
+                'Mast cells', 'Epithelial cells', 'Stromal cells')
+il$cellID <- Idents(il)
+```
+                
+Plot on t-SNE:
+
+```{r, warning = FALSE, error = FALSE}
+cols <- c('lightcoral', 'pink', 'violetred1', 'violetred4', 'yellow', 'goldenrod1', 
+          'yellow4', 'darkorange', 'darkorange3', 'chocolate4', 'tan', 'sandybrown', 
+          'red', 'indianred1', 'darkred', 'black', 'darkslateblue', 'mediumorchid', 
+          'plum4', 'mediumpurple1', 'magenta4', 'cornflowerblue', 'cyan4', 'blue', 
+          'chartreuse3', 'darkgreen')
+DimPlot(il, 
+        reduction = 'tsne',
+        group.by = 'cellID',
+        cols = cols)
+```
+
+Plot on UMAP:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        reduction = 'umap',
+        group.by = 'cellID',
+        cols = cols)
+```
+
+Plot again, one cell type at a time
+
+Naive ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = naiveT, 
+        cols.highlight = "lightcoral", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = CyclingCD4T$barcode, 
+        cols.highlight = "violetred4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Follicular CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = FollicularCD4T$barcode, 
+        cols.highlight = "pink", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ActivatedCD4T$barcode, 
+        cols.highlight = "violetred1", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated CD8 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = CD8_activated$barcode, 
+        cols.highlight = "yellow", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated gd T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = gd_activated$barcode, 
+        cols.highlight = "darkorange", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+CD2neg gd T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = gd_CD2neg$barcode, 
+        cols.highlight = "sandybrown", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling CD8 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = CD8_cycling$barcode, 
+        cols.highlight = "yellow4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = gd_cycling$barcode, 
+        cols.highlight = "chocolate4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic CD8 ab cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = CD8_cytotoxic$barcode, 
+        cols.highlight = "goldenrod1", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = gd_cytotoxic$barcode, 
+        cols.highlight = "darkorange3", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+SELLhi gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = gd_SELLpos$barcode, 
+        cols.highlight = "tan", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ILC1$barcode, 
+        cols.highlight = "red", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ILC1_cytotoxic$barcode, 
+        cols.highlight = "indianred1", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ILC1_cycling$barcode, 
+        cols.highlight = "darkred", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Group 3 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ILC3$barcode, 
+        cols.highlight = "black", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+ASCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ASC$barcode, 
+        cols.highlight = "darkslateblue", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Transitioning B cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = B_transitioning$barcode, 
+        cols.highlight = "mediumorchid", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated B cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = B_nonrestingnoncycling$barcode, 
+        cols.highlight = "magenta4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling B cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = B_cycling$barcode, 
+        cols.highlight = "mediumpurple1", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Resting B cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = B_resting$barcode, 
+        cols.highlight = "plum4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Dendritic cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = DC, 
+        cols.highlight = "cornflowerblue", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Macrophages:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = mac, 
+        cols.highlight = "cyan4", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Mast cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = mast, 
+        cols.highlight = "blue", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Epithelial cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ep, 
+        cols.highlight = "chartreuse3", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Stromal cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = stromal, 
+        cols.highlight = "darkgreen", 
+        sizes.highlight = 2.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+### Further QC visualization
+
+Let's look at some of our parameters that were used during our cell filtering QC steps. We can visualize these overlaid onto our t-SNE and as violin plots, sorting by cellID.
+
+Doublet probability scores:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(il, features = c("Scrublet"), pt.size = 0.5, min.cutoff = .05, max.cutoff = 0.25, reduction = 'tsne') # view doublet probabilities
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(il, features = c("Scrublet"), pt.size = 0.5, cols = cols)
+```
+
+Tidy this doublet probability plot up as a box and whisker:
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('Scrublet', 'cellID')]])
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                                  'Follicular CD4 ab T cells',
+                                                  'Activated CD4 ab T cells',
+                                                  'Cycling CD4 ab T cells',
+                                                  'Activated CD8 ab T cells',
+                                                  'Cytotoxic CD8 ab T cells',
+                                                  'Cycling CD8 ab T cells',
+                                                  'Activated gd T cells',
+                                                  'Cytotoxic gd T cells',
+                                                  'Cycling gd T cells',
+                                                  'SELLhi gd T cells',
+                                                  'CD2neg GD T cells',
+                                                  'Activated group 1 ILCs',
+                                                  'Cytotoxic group 1 ILCs',
+                                                  'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                                  'Antibody-secreting cells', 
+                                                  'Transitioning B cells',
+                                                  'Resting B cells', 
+                                                  'Cycling B cells', 
+                                                  'Activated B cells',
+                                                  'Dendritic cells', 
+                                                  'Macrophages',
+                                                  'Mast cells',
+                                                  'Epithelial cells', 
+                                                  'Stromal cells'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = cellID)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8),
+               color = cols)+
+  theme(axis.text.x = element_text(angle = 90))+
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="grey40", aes(group=variable), position=position_dodge(.8))
+
+```
+
+Percent mitochondrial reads:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(il, features = c("prcntMito"), pt.size = 0.5, min.cutoff = .025, max.cutoff = 0.1, reduction = 'tsne') # view % mitochondrial reads
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(il, features = c("prcntMito"), pt.size = 0.5, cols = cols)
+```
+
+Tidy this mitochondrial plot up as a box and whisker:
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('prcntMito', 'cellID')]])
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                                  'Follicular CD4 ab T cells',
+                                                  'Activated CD4 ab T cells',
+                                                  'Cycling CD4 ab T cells',
+                                                  'Activated CD8 ab T cells',
+                                                  'Cytotoxic CD8 ab T cells',
+                                                  'Cycling CD8 ab T cells',
+                                                  'Activated gd T cells',
+                                                  'Cytotoxic gd T cells',
+                                                  'Cycling gd T cells',
+                                                  'SELLhi gd T cells',
+                                                  'CD2neg GD T cells',
+                                                  'Activated group 1 ILCs',
+                                                  'Cytotoxic group 1 ILCs',
+                                                  'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                                  'Antibody-secreting cells', 
+                                                  'Transitioning B cells',
+                                                  'Resting B cells', 
+                                                  'Cycling B cells', 
+                                                  'Activated B cells',
+                                                  'Dendritic cells', 
+                                                  'Macrophages',
+                                                  'Mast cells',
+                                                  'Epithelial cells', 
+                                                  'Stromal cells'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = cellID)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8),
+               color = cols)+
+  theme(axis.text.x = element_text(angle = 90))+
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="grey40", aes(group=variable), position=position_dodge(.8))
+
+```
+
+Total transcripts (UMIs) per cell:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(il, features = c("nCount_RNA"), pt.size = 0.5, min.cutoff = 5000, max.cutoff = 30000, reduction = 'tsne') # view total RNA counts
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(il, features = c("nCount_RNA"), pt.size = 0.5, cols = cols)
+```
+
+Tidy this UMI plot up as a box and whisker:
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('nCount_RNA', 'cellID')]])
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                                  'Follicular CD4 ab T cells',
+                                                  'Activated CD4 ab T cells',
+                                                  'Cycling CD4 ab T cells',
+                                                  'Activated CD8 ab T cells',
+                                                  'Cytotoxic CD8 ab T cells',
+                                                  'Cycling CD8 ab T cells',
+                                                  'Activated gd T cells',
+                                                  'Cytotoxic gd T cells',
+                                                  'Cycling gd T cells',
+                                                  'SELLhi gd T cells',
+                                                  'CD2neg GD T cells',
+                                                  'Activated group 1 ILCs',
+                                                  'Cytotoxic group 1 ILCs',
+                                                  'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                                  'Antibody-secreting cells', 
+                                                  'Transitioning B cells',
+                                                  'Resting B cells', 
+                                                  'Cycling B cells', 
+                                                  'Activated B cells',
+                                                  'Dendritic cells', 
+                                                  'Macrophages',
+                                                  'Mast cells',
+                                                  'Epithelial cells', 
+                                                  'Stromal cells'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = cellID)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8),
+               color = cols)+
+  theme(axis.text.x = element_text(angle = 90))+
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="grey40", aes(group=variable), position=position_dodge(.8))
+
+```
+
+Total genes detected per cell:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(il, features = c("GenesDetected"), pt.size = 0.5, min.cutoff = 500, max.cutoff = 3000, reduction = 'tsne') # view total genes detected
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(il, features = c("GenesDetected"), pt.size = 0.5, cols = cols)
+```
+
+Tidy this genes detected plot up as a box and whisker:
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('GenesDetected', 'cellID')]])
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                                  'Follicular CD4 ab T cells',
+                                                  'Activated CD4 ab T cells',
+                                                  'Cycling CD4 ab T cells',
+                                                  'Activated CD8 ab T cells',
+                                                  'Cytotoxic CD8 ab T cells',
+                                                  'Cycling CD8 ab T cells',
+                                                  'Activated gd T cells',
+                                                  'Cytotoxic gd T cells',
+                                                  'Cycling gd T cells',
+                                                  'SELLhi gd T cells',
+                                                  'CD2neg GD T cells',
+                                                  'Activated group 1 ILCs',
+                                                  'Cytotoxic group 1 ILCs',
+                                                  'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                                  'Antibody-secreting cells', 
+                                                  'Transitioning B cells',
+                                                  'Resting B cells', 
+                                                  'Cycling B cells', 
+                                                  'Activated B cells',
+                                                  'Dendritic cells', 
+                                                  'Macrophages',
+                                                  'Mast cells',
+                                                  'Epithelial cells', 
+                                                  'Stromal cells'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = cellID)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8),
+               color = cols)+
+  theme(axis.text.x = element_text(angle = 90))+
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="grey40", aes(group=variable), position=position_dodge(.8))
+```
+
+### Assess cell type distributions
+
+Based on the 26 cell types we've identified, let's next find out how these are distributed across our dataset. 
+
+First, let's determine some basic information about our cell types, such as how many cells are in each:
+
+```{r, warning = FALSE, error = FALSE}
+cluster_no <- table(il$cellID) # how many cells are in each type?
+cluster_no
+sum(cluster_no) # how many cells are there total?
+min(cluster_no) # how many cells are in our smallest cell type?
+```
+
+Let's go on to plot these sizes, taking into account also which sample cells were derived from:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+clusterSample_no <- table(il$SampleID, il$cellID)
+barplot(clusterSample_no,
+        col = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange", "deepskyblue4", "deepskyblue3"),
+        xlab = "Cell type", 
+        ylab = "Number of cells", 
+        las = 2,
+        legend = rownames(clusterSample_no),
+        border = NA,
+        space = 0.05)
+```
+
+Instead of looking at the size of each cell type, let's look at the proportions of cells coming from different samples within each cluster. 
+
+Look at the proportion of cells coming from each sample type (IPP, NoPP, X2I) within each cell type:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(il) <- il$cellID
+il$tissue <- substring(il$SampleID, 1, 3) # create a tissue assignment for each cell
+GutTissueTotalCells <- prop.table(table(il$tissue)) # What percent of total cells are from each tissue?
+GutTissuePercents <- prop.table(table(Idents(il),il$tissue), 
+                                margin = 1) # What percent of cells from each cluster belong to each tissue?
+GutTissuePercents <- rbind(GutTissuePercents, GutTissueTotalCells) # add row of overall percentages to table
+#rowSums(GutTissuePercents) # make sure all row sums are equal to 1
+GutTissuePercents <- t(GutTissuePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutTissuePercents, # create stacked bar plot
+        col = c("chartreuse3", "darkorange", "deepskyblue3"), 
+        legend = rownames(GutTissuePercents),
+        xlab = "Cell type", 
+        ylab = "Frequency within cell type", 
+        las = 2,
+        border = NA,
+        space = 0.05,
+        legend.text = TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+```
+
+Look at the proportion of cells coming from each animal (Pig 1, Pig 2) within each cluster:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(il) <- il$cellID
+il$pigID <- substr(il$SampleID, 
+                   nchar(il$SampleID) - 1 + 1, 
+                   nchar(il$SampleID)) # create pig number assignment for each cell based on last character in SampleID assignment
+GutPigTotalCells <- prop.table(table(il$pigID)) # What percent of total cells are from each pig?
+GutPigPercents <- prop.table(table(Idents(il),il$pigID), 
+                             margin = 1) # What percent of cells from each cluster belong to each tissue?
+GutPigPercents <- rbind(GutPigPercents, GutPigTotalCells) # add row of overall percentages to table
+#rowSums(GutPigPercents) # make sure all row sums are equal to 1
+GutPigPercents <- t(GutPigPercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutPigPercents, # create stacked bar plot
+        col = c("red", "dodgerblue3"), 
+        legend = rownames(GutPigPercents),
+        xlab = "Cell type", 
+        ylab = "Frequency within cell type", 
+        las = 2,
+        border = NA,
+        space = 0.05,
+        legend.text = TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+```
+
+Look at the proportion of cells coming from each individual sample (IPP1, IPP2, NoPP1, NoPP2, X2I1, X2I2) within each cluster:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(il) <- il$cellID
+GutSampleTotalCells <- prop.table(table(il$SampleID)) # What percent of total cells are from each sample?
+GutSamplePercents <- prop.table(table(Idents(il),il$SampleID), 
+                                margin = 1) # What percent of cells from each cluster belong to each sample?
+GutSamplePercents <- rbind(GutSamplePercents, GutSampleTotalCells) # add row of overall percentages to table
+#rowSums(GutSamplePercents) # make sure all are equal to 1
+GutSamplePercents <- t(GutSamplePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutSamplePercents, # create stacked bar plot
+        col = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange", "deepskyblue4", "deepskyblue3"), 
+        legend = rownames(GutSamplePercents),
+        xlab = "Cell type", 
+        ylab = "Frequency within cell type", 
+        las = 2,
+        border = NA,
+        space = 0.05,
+        legend.text = TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+```
+
+We can also view the three previous metrics overlaid onto our t-SNE plot.
+
+Tissue ID:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        group.by = "tissue")
+```
+
+```{r, warning = FALSE, error = FALSE, fig.width = 25}
+Idents(il) <- il$cellID
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        split.by = "tissue", 
+        cols = cols)
+```
+
+Animal ID:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        group.by = "pigID")
+```
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+Idents(il) <- il$cellID
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        split.by = "pigID",
+        cols = cols)
+```
+
+Sample IDs:
+
+```{r, warning = FALSE, error = FALSE, fig2, fig.height = 3, fig.width = 6}
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        group = "SampleID")
+```
+
+```{r, warning = FALSE, error = FALSE, fig.width = 35}
+Idents(il) <- il$cellID
+DimPlot(il, # make t-SNE showing sample origins
+        reduction = "tsne", 
+        pt.size = 0.1, 
+        split.by = "SampleID",
+        cols = cols)
+```
+
+And let's also make a stacked bar chart for each sample & calculate the percentages of cells derived from each of the 26 populations:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(il) <- il$SampleID
+GutSampleTotalCells <- prop.table(table(il$cellID)) # What percent of total cells are from each sample?
+GutSamplePercents <- prop.table(table(Idents(il),il$cellID), 
+                                margin = 1) # What percent of cells from each cluster belong to each sample?
+GutSamplePercents <- rbind(GutSamplePercents, GutSampleTotalCells) # add row of overall percentages to table
+#rowSums(GutSamplePercents) # make sure all are equal to 1
+GutSamplePercents <- t(GutSamplePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutSamplePercents, # create stacked bar plot
+        col = c('lightcoral', 'pink', 'violetred1', 'violetred4', 'yellow', 'goldenrod1', 
+          'yellow4', 'darkorange', 'darkorange3', 'chocolate4', 'tan', 'sandybrown', 
+          'red', 'indianred1', 'darkred', 'black', 'darkslateblue', 'mediumorchid', 
+          'plum4', 'mediumpurple1', 'magenta4', 'cornflowerblue', 'cyan4', 'blue', 
+          'chartreuse3', 'darkgreen'), 
+        #legend = rownames(GutSamplePercents),
+        xlab = "Cell type", 
+        ylab = "Frequency within cell type", 
+        las = 2,
+        border = NA,
+        #legend.text = TRUE, 
+        #args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)),
+        space = 0.05)
+```
+
+And let's also make a stacked bar chart for each tissue type & calculate the percentages of cells derived from each of the 26 populations:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(il) <- il$tissue
+GutSampleTotalCells <- prop.table(table(il$cellID)) # What percent of total cells are from each sample?
+GutSamplePercents <- prop.table(table(Idents(il),il$cellID), 
+                                margin = 1) # What percent of cells from each cluster belong to each sample?
+GutSamplePercents <- rbind(GutSamplePercents, GutSampleTotalCells) # add row of overall percentages to table
+#rowSums(GutSamplePercents) # make sure all are equal to 1
+GutSamplePercents <- t(GutSamplePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutSamplePercents, # create stacked bar plot
+        col = c('lightcoral', 'pink', 'violetred1', 'violetred4', 'yellow', 'goldenrod1', 
+          'yellow4', 'darkorange', 'darkorange3', 'chocolate4', 'tan', 'sandybrown', 
+          'red', 'indianred1', 'darkred', 'black', 'darkslateblue', 'mediumorchid', 
+          'plum4', 'mediumpurple1', 'magenta4', 'cornflowerblue', 'cyan4', 'blue', 
+          'chartreuse3', 'darkgreen'), 
+        #legend = rownames(GutSamplePercents),
+        xlab = "Cell type", 
+        ylab = "Frequency within cell type", 
+        las = 2,
+        border = NA,
+        #legend.text = TRUE, 
+        #args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)),
+        space = 0.05)
+```
+
+Make some density plots from t-SNE coordinates for each sample type:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(il) <- il$tissue
+IPPonly <- subset(il, idents = "IPP") # create new object of only IPP tissue cells
+NoPPonly <- subset(il, idents = "NoP") # create new object of only NoP tissue cells
+I2only <- subset(il, idents = "X2I") # create new object of only X2I tissue cells
+```
+
+```{r, warning = FALSE, error = FALSE}
+IPPembeds = Embeddings(IPPonly[["tsne"]]) # extract tsne coordinates from Seurat object
+IPPembeds <- as.data.frame(IPPembeds) # convert to data frame
+ggplot(IPPembeds, aes(x = tSNE_1, y = tSNE_2)) + # create a 2D heatmap
+  geom_pointdensity(adjust = 4) +
+  scale_color_gradientn(colours = c("darkmagenta", "darkturquoise", "yellow", "orange", "red")) + # use custom color gradient scale
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), # set blank white elements
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+Create a density plot for cells from NoPP samples:
+
+```{r, warning = FALSE, error = FALSE}
+NoPPembeds = Embeddings(NoPPonly[["tsne"]]) # extract tsne coordinates from Seurat object
+NoPPembeds <- as.data.frame(NoPPembeds) # convert to data frame
+ggplot(NoPPembeds, aes(x = tSNE_1, y = tSNE_2)) + # create a 2D heatmap
+  geom_pointdensity(adjust = 3.05) +
+  scale_color_gradientn(colours = c("darkmagenta", "darkturquoise", "yellow", "orange", "red")) + # use custom color gradient scale
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), # set blank white elements
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+Create a density plot for cells from X2I samples:
+
+```{r, warning = FALSE, error = FALSE}
+I2embeds = Embeddings(I2only[["tsne"]]) # extract tsne coordinates from seurat object
+I2embeds <- as.data.frame(I2embeds) # convert to data frame
+ggplot(I2embeds, aes(x = tSNE_1, y = tSNE_2)) + # create a 2D heatmap
+  geom_pointdensity(adjust = 4) +
+  scale_color_gradientn(colours = c("darkmagenta", "darkturquoise", "yellow", "orange", "red")) + # use custom color gradient scale
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), # set blank white elements
+        panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+### Save data
+
+Lastly, let's re-save our Seurat object with the new annotations stored in the cellID meta data slot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE, eval = FALSE}
+Idents(il) <- il$cellID
+saveRDS(il, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Lukas P. M. Kremer (2019). ggpointdensity: A Cross Between a 2D Density Plot and a Scatter Plot. R package version 0.1.0.
+  https://CRAN.R-project.org/package=ggpointdensity
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2007). Reshaping Data with the reshape Package. Journal of Statistical
+  Software, 21(12), 1-20. URL http://www.jstatsoft.org/v21/i12/.
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham and Jennifer Bryan (2019). readxl: Read Excel Files. R package version 1.3.1.
+  https://CRAN.R-project.org/package=readxl
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1.
+  https://CRAN.R-project.org/package=scales
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation.
+  R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

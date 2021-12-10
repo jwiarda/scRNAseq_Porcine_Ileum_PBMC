@@ -1,0 +1,449 @@
+---
+title: "Characterization of Ileal Cells: Sample Pseudobulk & Quality Comparisons"
+author: "Jayne Wiarda"
+date: "31Mar2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed scRNA-seq data from six porcine ileum samples through general data QC and pre-processing steps. At this point, we can start digging into the data more in order to form some biological interpretations! By the end of this analysis, we will be able to classify our cells into some general lineage designations, and we will also be able to see some biological differences occurring between different sample types. We will also be able to output lists of genes differentially expressed amongst clusters.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+Analyses are divided into sections as follows, and only one of these components is specified and included below:
+
+* General characterization of the data, where we visualize various metrics for our cells and/or clusters
+* Hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+* Cluster-based differential gene expression analysis to determine genes differentially expressed in a cluster relative to the rest of the dataset (cluster-based overall DGE) or in one cluster relative to another (cluster-based pairwise DGE)
+* Cluster-based pseudobulk correlation as another method to assess similarity/dissimilarity between pairwise cluster combinations
+* Tissue composition comparisons, to determine differences in the compositions of different cells and/or transcripts across different ileal sample types
+* Sample-specific quality comparisons, where we assess the whole transcriptomic profiles from each sample
+* Cluster-based gene set enrichment analysis, where we calculate enrichment of signatures for sorted immune cell populations from bulk RNA-seq datasets within our single-cell dataset
+
+This file specifically goes over cluster-based gene set enrichment analysis, where we calculate enrichment of signatures for sorted immune cell populations from bulk RNA-seq datasets within our single-cell dataset
+
+## Cluster-based gene set enrichment analysis (GSEA)
+
+To perform GSEA on our single-cell dataset, we first obtained gene expression signatures derived from four heavily-reference human immune cell datasets. Since there aren't well-established reference datasets for immune cells in the gut, these datasets are from PBMCs instead. We obtained datasets for immune cell lineages from four sources:
+
+* From the Haemopedia dataset (Choi et al. 2019):
+  - B cells
+  - T cells
+  - NK cells
+  - Monocytes
+  - DCs
+* From the Linsley dataset (Linsley et al. 2014):
+  - B cells
+  - T cells
+  - NK cells
+  - Monocytes
+* From the Human Protein Atlas (HPA) dataset (Uhlen et al. 2019):
+  - B cells
+  - T cells
+  - NK cells
+  - Monocytes
+  - DCs
+* From the Monaco dataset (Monaco et al. 2019):
+  - B cells
+  - T cells
+  - NK cells
+  - Monocytes
+  - DCs
+  
+### Load required software packages
+
+For GSEA analysis of single-cell data, we primarily utilize features of the R software package, AUCell (Aibar et al. 2016; Aibar et al. 2017). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Required packages: Seurat (Stuart & Butler et al. 2019), ggplot2 (Wickham 2016), dplyr (Wickham et al. 2020), tidyr (Wickham 2020), scales (Wickham & Seidel 2020), writexl (Ooms 2020)
+
+```{r, message = FALSE}
+library(AUCell)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(writexl)  
+```
+
+### Import relevant data
+
+Read in information for porcine genes in our pig gene annotation file:
+
+```{r, warning = FALSE, error = FALSE}
+pigGenes <- read.delim("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/QC/UnfilteredGeneInfo.txt", header = TRUE, sep = " ")
+```
+
+Read in human-to-pig gene ortholog information, obtained from biomaRt (Durinck et al. 2009; Durinck et al. 2005; obtained according to instructions outlined at https://www.ensembl.info/2009/01/21/how-to-get-all-the-orthologous-genes-between-two-species/ but specifying human and pig instead of human and mouse), and filter down to only one-to-one gene orthologs:
+
+```{r, warning = FALSE, error = FALSE}
+orthoGenes <- read.delim("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/OrthologLists/PIGvsHUMAN_GeneOrtholog_06022020.txt", header = TRUE, sep = "\t")
+colnames(orthoGenes) <- orthoGenes[1,]
+orthoGenes <- orthoGenes[-c(1), ] 
+orthoGenes <- subset(orthoGenes, `Human homology type` == 'ortholog_one2one') # select only genes that are one-to-one orthologues
+```
+
+Read in our Seurat object of our porcine ileum scRNA-seq dataset:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA"
+Idents(il) <- il$neworder # specify neworder as cluster order to use
+```
+
+### Read in and filter our lineage-enriched genes
+
+Criteria for how we obtained and filtered genes are as follows:
+
+* From the Haemopedia dataset (Choi et al. 2019):
+  - Go to haemospere.org
+  - Click on the 'Searches' tab
+  - Click on the 'High Expression Search' option
+  - Input the following parameters:
+    - Dataset: Haemopedia-Human-RNASeq
+    - Sample group: cell_lineage
+    - For the last box, select 'NK Cell Lineage', 'T Cell Lineage', 'B Cell Lineage', 'Dendritic Cell Lineage', or 'Macrophage Lineage'
+    - Repeat the next few steps for each of the cell lineage selections
+      - Click 'Begin Search'
+      - From the 'Action...' tab, select 'export...'
+      - Copy and paste text, and save as a .txt file
+    - Within R:
+      - Isolate down to only genes that had enrichment scores >= 1 for each cell lineage
+      - Isolate down to only genes that are 1:1 gene orthologs between pigs and humans
+      - Convert our human gene names to pig gene names
+      
+* From the Linsley dataset (Linsley et al. 2014):
+  - Go to haemospere.org
+  - Click on the 'Searches' tab
+  - Click on the 'High Expression Search' option
+  - Input the following parameters:
+    - Dataset: Linsley
+    - Sample group: cell_lineage
+    - For the last box, select 'NK Cell Lineage', 'T Cell Lineage', 'B Cell Lineage', or 'Macrophage Lineage'
+  - Repeat the next few steps for each of the cell lineage selections
+    - Click 'Begin Search'
+    - From the 'Action...' tab, select 'export...'
+    - Copy and paste text, and save as a .txt file
+  - Within R:
+    - Isolate down to only genes that had enrichment scores >= 1 for each cell lineage
+    - Isolate down to only genes that are 1:1 gene orthologs between pigs and humans
+    - Convert our human gene names to pig gene names
+      
+* From the Human Protein Atlas (HPA) dataset (Uhlen et al. 2019):
+  - Go to https://www.proteinatlas.org/humanproteome/blood
+  - In the paragraph starting with 'The genome-wide RNA expression profiles of human protein-coding genes in 18 single cell types are presented covering various B-cells, T-cells, NK-cells, monocytes, granulocytes and dendritic cells...', the cell names should be hyperlinks. For each of B-cells, T-cells, monocytes, and dendritic cells, click on the cell name hyperlink
+  - In Table 1, click on the bottom right number, which gives the total number of genes elevated expression for the cell type (e.g. for B-cells, this number is 727)
+  - Under the 'Download' bar on the top, download the data and save as a .txt file
+  - Within R:
+    - Isolate down to only genes that were specified as 'Lineage enriched' under the 'RNA blood lineage specificity' column
+    - Isolate down to only genes that are 1:1 gene orthologs between pigs and humans
+    - Convert our human gene names to pig gene names
+  
+* From the Monaco dataset (Monaco et al. 2019):
+  - Go to publication at doi.org/10.1016/j.celrep.2019.01.041
+  - Download Table S2
+  - Convert the 'FoldChange TPM_TMM' and 'FDR TPM_TMM' tabs into .txt documents
+  - Within R: 
+    - Identify genes that have both FDRTPMTMM < 0.05 and FoldChangeTPMTMM > 0.5 when looking only at the columns of one of the following specifications: 'T cells', 'B cells', 'NK', 'Monocytes', 'DCs'
+    - Isolate down to only genes that are 1:1 gene orthologs between pigs and humans
+    - Convert our human gene names to pig gene names
+
+For the Monaco dataset:
+
+```{r, warning = FALSE, error = FALSE}
+MonacoFoldChangeTPMTMM <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Monaco_FoldChangeTPMTMM.txt", header = TRUE)
+colnames(MonacoFoldChangeTPMTMM) <- MonacoFoldChangeTPMTMM[2,]
+MonacoFoldChangeTPMTMM <- MonacoFoldChangeTPMTMM[-c(1:2),]
+MonacoFoldChangeTPMTMM$Ensembl <- sub("\\..*", "", MonacoFoldChangeTPMTMM$`Ensembl ID`)
+MonacoFDRTPMTMM <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Monaco_FDRTPMTMM.txt", header = TRUE)
+MonacoFDRTPMTMM$Ensembl <- sub("\\..*", "", MonacoFDRTPMTMM$Ensembl.ID)
+
+NK_Monaco_all <- intersect((subset(MonacoFDRTPMTMM$Ensembl, MonacoFDRTPMTMM$NK < .05)), 
+                       (subset(MonacoFoldChangeTPMTMM$Ensembl, MonacoFoldChangeTPMTMM$NK > 0.5)))
+NK_Monaco_all <- as.data.frame(NK_Monaco_all)
+NK_Monaco <- merge(NK_Monaco_all, orthoGenes, by.x = "NK_Monaco_all", by.y = "Human gene stable ID")
+NK_Monaco <- merge(NK_Monaco, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+NK_Monaco <- NK_Monaco$Name
+
+B_Monaco_all <- intersect((subset(MonacoFDRTPMTMM$Ensembl, MonacoFDRTPMTMM$B.cells < .05)), 
+                      (subset(MonacoFoldChangeTPMTMM$Ensembl, MonacoFoldChangeTPMTMM$`B cells` > 0.5)))
+B_Monaco_all <- as.data.frame(B_Monaco_all)
+B_Monaco <- merge(B_Monaco_all, orthoGenes, by.x = "B_Monaco_all", by.y = "Human gene stable ID")
+B_Monaco <- merge(B_Monaco, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+B_Monaco <- B_Monaco$Name
+
+T_Monaco_all <- intersect((subset(MonacoFDRTPMTMM$Ensembl, MonacoFDRTPMTMM$T.cells < .05)), 
+                      (subset(MonacoFoldChangeTPMTMM$Ensembl, MonacoFoldChangeTPMTMM$`T cells` > 0.5)))
+T_Monaco_all <- as.data.frame(T_Monaco_all)
+T_Monaco <- merge(T_Monaco_all, orthoGenes, by.x = "T_Monaco_all", by.y = "Human gene stable ID")
+T_Monaco <- merge(T_Monaco, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+T_Monaco <- T_Monaco$Name
+
+DC_Monaco_all <- intersect((subset(MonacoFDRTPMTMM$Ensembl, MonacoFDRTPMTMM$DCs < .05)), 
+                                 (subset(MonacoFoldChangeTPMTMM$Ensembl, MonacoFoldChangeTPMTMM$DCs > 0.5)))
+DC_Monaco_all <- as.data.frame(DC_Monaco_all)
+DC_Monaco <- merge(DC_Monaco_all, orthoGenes, by.x = "DC_Monaco_all", by.y = "Human gene stable ID")
+DC_Monaco <- merge(DC_Monaco, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+DC_Monaco <- DC_Monaco$Name
+
+Monocyte_Monaco_all <- intersect((subset(MonacoFDRTPMTMM$Ensembl, MonacoFDRTPMTMM$Monocytes < .05)), 
+                                       (subset(MonacoFoldChangeTPMTMM$Ensembl, MonacoFoldChangeTPMTMM$Monocytes > 0.5)))
+Monocyte_Monaco_all <- as.data.frame(Monocyte_Monaco_all)
+Monocyte_Monaco <- merge(Monocyte_Monaco_all, orthoGenes, by.x = "Monocyte_Monaco_all", by.y = "Human gene stable ID")
+Monocyte_Monaco <- merge(Monocyte_Monaco, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+Monocyte_Monaco <- Monocyte_Monaco$Name
+```
+
+For the Linsley dataset:
+
+```{r, warning = FALSE, error = FALSE}
+B_Linsley_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Linsley_BCellLineage.txt", header = TRUE)
+B_Linsley_all <- subset(B_Linsley_all, score >= 1)
+B_Linsley <- merge(B_Linsley_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+B_Linsley <- merge(B_Linsley, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+B_Linsley <- B_Linsley$Name
+
+T_Linsley_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Linsley_TCellLineage.txt", header = TRUE)
+T_Linsley_all <- subset(T_Linsley_all, score >= 1)
+T_Linsley <- merge(T_Linsley_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+T_Linsley <- merge(T_Linsley, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+T_Linsley <- T_Linsley$Name
+
+NK_Linsley_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Linsley_NKCellLineage.txt", header = TRUE)
+NK_Linsley_all <- subset(NK_Linsley_all, score >= 1)
+NK_Linsley <- merge(NK_Linsley_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+NK_Linsley <- merge(NK_Linsley, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+NK_Linsley <- NK_Linsley$Name
+
+Macrophage_Linsley_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Linsley_MacrophageCellLineage.txt", header = TRUE)
+Macrophage_Linsley_all <- subset(Macrophage_Linsley_all, score >= 1)
+Macrophage_Linsley <- merge(Macrophage_Linsley_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+Macrophage_Linsley <- merge(Macrophage_Linsley, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+Macrophage_Linsley <- Macrophage_Linsley$Name
+```
+
+For the Haemopedia dataset:
+
+```{r, warning = FALSE, error = FALSE}
+NK_Haemopedia_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Haemopedia_NKCellLineage.txt", header = TRUE)
+NK_Haemopedia_all <- subset(NK_Haemopedia_all, score >= 1)
+NK_Haemopedia <- merge(NK_Haemopedia_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+NK_Haemopedia <- merge(NK_Haemopedia, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+NK_Haemopedia <- NK_Haemopedia$Name
+
+T_Haemopedia_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Haemopedia_TCellLineage.txt", header = TRUE)
+T_Haemopedia_all <- subset(T_Haemopedia_all, score >= 1)
+T_Haemopedia <- merge(T_Haemopedia_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+T_Haemopedia <- merge(T_Haemopedia, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+T_Haemopedia <- T_Haemopedia$Name
+
+B_Haemopedia_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Haemopedia_BCellLineage.txt", header = TRUE)
+B_Haemopedia_all <- subset(B_Haemopedia_all, score >= 1)
+B_Haemopedia <- merge(B_Haemopedia_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+B_Haemopedia <- merge(B_Haemopedia, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+B_Haemopedia <- B_Haemopedia$Name
+
+Macrophage_Haemopedia_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Haemopedia_MacrophageLineage.txt", header = TRUE)
+Macrophage_Haemopedia_all <- subset(Macrophage_Haemopedia_all, score >= 1)
+Macrophage_Haemopedia <- merge(Macrophage_Haemopedia_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+Macrophage_Haemopedia <- merge(Macrophage_Haemopedia, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+Macrophage_Haemopedia <- Macrophage_Haemopedia$Name
+
+DC_Haemopedia_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/Haemopedia_DendriticCellLineage.txt", header = TRUE)
+DC_Haemopedia_all <- subset(DC_Haemopedia_all, score >= 1)
+DC_Haemopedia <- merge(DC_Haemopedia_all, orthoGenes, by.x = "GeneId", by.y = "Human gene stable ID")
+DC_Haemopedia <- merge(DC_Haemopedia, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+DC_Haemopedia <- DC_Haemopedia$Name
+```
+
+For the HPA dataset:
+
+```{r, warning = FALSE, error = FALSE}
+B_HPA_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/HPA_BLineageGenes.txt", header = TRUE)
+B_HPA_all <- subset(B_HPA_all, RNA.blood.lineage.specificity == "Lineage enriched")
+B_HPA <- merge(B_HPA_all, orthoGenes, by.x = "Ensembl", by.y = "Human gene stable ID")
+B_HPA <- merge(B_HPA, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+B_HPA <- B_HPA$Name
+
+T_HPA_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/HPA_TLineageGenes.txt", header = TRUE)
+T_HPA_all <- subset(T_HPA_all, RNA.blood.lineage.specificity == "Lineage enriched")
+T_HPA <- merge(T_HPA_all, orthoGenes, by.x = "Ensembl", by.y = "Human gene stable ID")
+T_HPA <- merge(T_HPA, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+T_HPA <- T_HPA$Name
+
+NK_HPA_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/HPA_NKLineageGenes.txt", header = TRUE)
+NK_HPA_all <- subset(NK_HPA_all, RNA.blood.lineage.specificity == "Lineage enriched")
+NK_HPA <- merge(NK_HPA_all, orthoGenes, by.x = "Ensembl", by.y = "Human gene stable ID")
+NK_HPA <- merge(NK_HPA, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+NK_HPA <- NK_HPA$Name
+
+Monocyte_HPA_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/HPA_MonocyteLineageGenes.txt", header = TRUE)
+Monocyte_HPA_all <- subset(Monocyte_HPA_all, RNA.blood.lineage.specificity == "Lineage enriched")
+Monocyte_HPA <- merge(Monocyte_HPA_all, orthoGenes, by.x = "Ensembl", by.y = "Human gene stable ID")
+Monocyte_HPA <- merge(Monocyte_HPA, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+Monocyte_HPA <- Monocyte_HPA$Name
+
+DC_HPA_all <- read.delim2("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Datasets_BulkRNA/HPA_DCLineageGenes.txt", header = TRUE)
+DC_HPA_all <- subset(DC_HPA_all, RNA.blood.lineage.specificity == "Lineage enriched")
+DC_HPA <- merge(DC_HPA_all, orthoGenes, by.x = "Ensembl", by.y = "Human gene stable ID")
+DC_HPA <- merge(DC_HPA, pigGenes, by.x = "Gene stable ID", by.y = "EnsemblID")
+DC_HPA <- DC_HPA$Name
+```
+
+### Define gene sets as a list
+
+```{r, warning = FALSE, error = FALSE}
+geneSets <- list(NK_Linsley = NK_Linsley,
+                 B_Linsley = B_Linsley,
+                 T_Linsley = T_Linsley,
+                 Macrophage_Linsley = Macrophage_Linsley,
+                 T_Haemopedia = T_Haemopedia,
+                 B_Haemopedia = B_Haemopedia,
+                 NK_Haemopedia = NK_Haemopedia,
+                 Macrophage_Haemopedia = Macrophage_Haemopedia,
+                 DC_Haemopedia = DC_Haemopedia,
+                 NK_Monaco = NK_Monaco,
+                 B_Monaco = B_Monaco,
+                 T_Monaco = T_Monaco,
+                 Monocyte_Monaco = Monocyte_Monaco,
+                 DC_Monaco = DC_Monaco,
+                 B_HPA = B_HPA,
+                 T_HPA = T_HPA,
+                 NK_HPA = NK_HPA,
+                 Monocyte_HPA = Monocyte_HPA,
+                 DC_HPA = DC_HPA) # make a list of the gene sets to look at
+```
+                 
+### Perform GSEA
+
+Start by defining a single-cell counts matrix, using raw counts rather than transformed data:
+```{r, warning = FALSE, error = FALSE}
+exprMatrix <- as.matrix(il[["RNA"]]@counts) # create a matrix of our gene counts
+```
+
+Rank the genes within each cell by expression level of raw counts:
+
+```{r, warning = FALSE, error = FALSE}
+cells_rankings <- AUCell_buildRankings(exprMatrix, nCores=1, plotStats=TRUE)
+```
+
+Determining how many genes from each of the gene sets can be found in the top 5% of ranked genes within each cell. From that plot, we calculate the area under the curve (AUC) to come up with an AUC score for each cell individually. Higher AUC score indicates higher enrichment for a gene set:
+
+```{r, warning = FALSE, error = FALSE}
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings, aucMaxRank = ceiling(0.05 * nrow(cells_rankings))) 
+```
+
+### Make a heatmap with scaled AUC score averages per cluster
+
+```{r, warning = FALSE, error = FALSE, fig.width = 25}
+clusterID <- as.data.frame(il[["seurat_clusters"]])
+clusterID <- t(clusterID)
+AUCs <- as.data.frame(getAUC(cells_AUC))
+AUCs <- rbind(AUCs, clusterID)
+AUCs <- t(AUCs)
+AUCs <- as.data.frame(AUCs)
+AUCs <- mutate_all(AUCs, function(x) as.numeric(as.character(x)))
+head(AUCs)
+scaledAUCs <- scale(AUCs[,1:length(names(geneSets))])
+scaledAUCs <- as.data.frame(scaledAUCs)
+clusterID <- as.data.frame(il[["seurat_clusters"]])
+scaledAUCs <- cbind(scaledAUCs, clusterID)
+head(scaledAUCs)
+gsAvsScaled <- aggregate(scaledAUCs[, 1:length(names(geneSets))], list(scaledAUCs$seurat_clusters), mean)
+colnames(gsAvsScaled)
+gsAvsScaled <- gsAvsScaled %>% 
+  pivot_longer(c(names(geneSets)), names_to = "geneSet", values_to = "AUC_relative")
+gsAvsScaled$Group.1 <- factor(gsAvsScaled$Group.1,levels = levels(il$neworder))
+gsAvsScaled$geneSet <- factor(gsAvsScaled$geneSet,levels = c('DC_Monaco', 'DC_HPA', 'DC_Haemopedia',
+                                                             'Monocyte_Monaco', 'Macrophage_Linsley', 'Monocyte_HPA', 'Macrophage_Haemopedia', 
+                                                             'NK_Monaco', 'NK_Linsley', 'NK_HPA', 'NK_Haemopedia',
+                                                             'T_Monaco', 'T_Linsley', 'T_HPA', 'T_Haemopedia', 
+                                                             'B_Monaco', 'B_Linsley', 'B_HPA', 'B_Haemopedia'))
+ggplot(gsAvsScaled, aes(Group.1, geneSet, fill = AUC_relative))+ 
+  geom_tile(color = 'grey60')+
+  scale_fill_gradientn(colors = c("mediumturquoise", "grey90", "red"), limits = c(-2,2), oob=squish) + 
+  theme_classic()
+```
+
+### Save the gene lists
+
+```{r, warning = FALSE, error = FALSE}
+m1 <- max(lengths(geneSets))
+df <- as.data.frame(t(as.data.frame(do.call(rbind, lapply(geneSets, `length<-`, m1)), stringsAsFactors= FALSE)))
+write_xlsx(x = df, 
+           path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/AUCell/HumanCellLineages_FinalGeneSets.xlsx",
+           col_names = TRUE) 
+```
+
+### Save AUC score information
+
+Save cluster-based relative average scores used to make heatmap:
+
+```{r, warning = FALSE, error = FALSE}
+write.table(gsAvsScaled, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/AUCell/ClusterAveraged_Scaled_AUCscores.txt')
+```
+
+Save raw scores from all cells:
+
+```{r, warning = FALSE, error = FALSE}
+AUCs <- cbind(AUCs, clusterID)
+AUCs$cellID <- rownames(AUCs)
+head(AUCs)
+write.table(AUCs, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/AUCell/Raw_AUCscores.txt')
+```
+
+Save scaled scores from all cells:
+
+```{r, warning = FALSE, error = FALSE}
+scaledAUCs$cellID <- rownames(scaledAUCs)
+head(scaledAUCs)
+write.table(scaledAUCs, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/AUCell/Scaled_AUCscores.txt')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Aibar et al. (2017) SCENIC: single-cell regulatory network inference and clustering. Nature Methods. doi: 10.1038/nmeth.4463
+
+Aibar. et al. (2016) AUCell: Analysis of 'gene set' activity in single-cell RNA-seq data.  R/Bioconductor package.
+
+Choi J, Baldwin TM, Wong M, Bolden JE, Fairfax KA, Lucas EC, Cole R, Biben C, Morgan C, Ramsay KA, Ng AP, Kauppi M, Corcoran LM, Shi W, Wilson N, Wilson MJ, Alexander WS, Hilton DJ, de Graaf CA. Haemopedia RNA-seq: a database of gene expression during haematopoiesis in mice and humans. Nucleic Acids Res. 2019 Jan 8;47(D1):D780-D785. doi: 10.1093/nar/gky1020. PMID: 30395284; PMCID: PMC6324085.
+
+Mapping identifiers for the integration of genomic datasets with the R/Bioconductor package biomaRt. Steffen Durinck, Paul T. Spellman, Ewan Birney and Wolfgang Huber, Nature Protocols 4, 1184-1191 (2009).
+  
+BioMart and Bioconductor: a powerful link between biological databases and microarray data analysis. Steffen Durinck, Yves Moreau, Arek Kasprzyk, Sean Davis, Bart De Moor, Alvis Brazma and Wolfgang Huber, Bioinformatics 21, 3439-3440 (2005).
+  
+Linsley PS, Speake C, Whalen E, Chaussabel D. Copy number loss of the interferon gene cluster in melanomas is linked to reduced T cell infiltrate and poor patient prognosis. PLoS One. 2014 Oct 14;9(10):e109760. doi: 10.1371/journal.pone.0109760. PMID: 25314013; PMCID: PMC4196925.
+
+Monaco G, Lee B, Xu W, Mustafah S, Hwang YY, Carré C, Burdin N, Visan L, Ceccarelli M, Poidinger M, Zippelius A, Pedro de Magalhães J, Larbi A. RNA-Seq Signatures Normalized by mRNA Abundance Allow Absolute Deconvolution of Human Immune Cell Types. Cell Rep. 2019 Feb 5;26(6):1627-1640.e7. doi: 10.1016/j.celrep.2019.01.041. PMID: 30726743; PMCID: PMC6367568.
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Uhlen M, Karlsson MJ, Zhong W, Tebani A, Pou C, Mikes J, Lakshmikanth T, Forsström B, Edfors F, Odeberg J, Mardinoglu A, Zhang C, von Feilitzen K, Mulder J, Sjöstedt E, Hober A, Oksvold P, Zwahlen M, Ponten F, Lindskog C, Sivertsson Å, Fagerberg L, Brodin P. A genome-wide transcriptomic analysis of protein-coding genes in human blood cells. Science. 2019 366(6472) DOI: 10.1126/science.aax9198	
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2. https://CRAN.R-project.org/package=tidyr
+
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

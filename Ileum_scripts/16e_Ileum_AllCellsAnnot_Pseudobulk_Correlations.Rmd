@@ -1,0 +1,114 @@
+---
+title: "Characterization of Ileal Cells: Cluster-based Pseudobulk Correlation Analysis"
+author: "Jayne Wiarda"
+date: "01June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created our final annotations for our data and need to re-do pairwise DGE analysis with these final annotations.
+## Cluster-based pseudobulk correlation analysis
+
+Another way to assess similarity/dissimilarity of cells in our dataset is by calculating correlations between gene expression profiles. Since it would be computationally expensive to determine pairwise correlation between each pairwise combination of cells in our dataset, we instead calculate correlation between pairwise cluster combinations, where each cell type is represented by a pseudobulk gene expression profile. We calculate a pseudobulk profile as the average of gene expression from normalized counts in our RNA assay, and then go on to determine correlation between pseudobulk profiles of different cell types, using Spearman correlation.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: ggplot2 (Wickham 2016), writexl (Ooms 2020), scales (Wickham & Seidel 2020), tidyr (Wickham 2020)
+
+```{r, message = FALSE}
+library(Seurat)  
+library(writexl)        
+library(scales)
+library(ggplot2)
+library(tidyr)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA"
+Idents(il) <- il$phylo # place clusters in phylo order determined by hierarchical clustering analysis
+```
+
+### Calculate pseudobulk profiles for each cluster
+
+Calculate pseudobulk profiles from our normalized RNA counts:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+phylo <- levels(il$phylo)
+av.exp <- AverageExpression(il, return.seurat = TRUE) # create in-silico bulk RNA-seq dataset for each sample
+counts <- as.matrix(av.exp@assays$RNA@data)
+```
+
+### Save the pseudobulk counts
+
+```{r, warning = FALSE, error = FALSE}
+write.table(counts, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Pseudobulk/AllCells_FINALannot_Pseudobulk_AvGeneCounts.xlsx')
+```
+
+### Calculate Spearman correlation between clusters
+
+```{r, warning = FALSE, error = FALSE}
+cor.exp <- as.data.frame(cor(counts, method = 'spearman'))
+cor.exp$x <- rownames(cor.exp)
+cor.df <- tidyr::gather(data = cor.exp, y, correlation, levels(Idents(il)))
+cor.df$x <- factor(cor.df$x,levels = levels(Idents(il)))
+cor.df$y <- factor(cor.df$y,levels = levels(Idents(il)))
+cor.df$correlation <- round(cor.df$correlation, digits = 2)
+```
+
+### Save our data
+
+```{r, warning = FALSE, error = FALSE, eval = FALSE}
+write_xlsx(x = cor.df, 
+           path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Pseudobulk/AllCells_FINALannot_Pairwise_Pseudobulk_SpearmanCorrelation.xlsx",
+           col_names = TRUE)
+```
+
+### Plot pairwise pseudobulk correlations on a heatmap
+
+Heatmap with only colors to represent correlations:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 17, fig.height=12}
+ggplot(cor.df, aes(x, y, fill = correlation)) +
+  geom_tile()+
+  scale_fill_gradientn(colours = c('beige', 'yellow','orange','red', 'darkred'), oob = squish, limits = c(min(cor.df$correlation), 1))
+```
+
+Heatmap with correlation values also included:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 17, fig.height=12}
+ggplot(cor.df, aes(x, y, fill = correlation)) +
+  geom_tile()+
+  scale_fill_gradientn(colours = c('beige', 'yellow','orange','red', 'darkred'))+ 
+  geom_text(aes(x, y, label = correlation), color = "black", size = 2)
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2. https://CRAN.R-project.org/package=tidyr
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales

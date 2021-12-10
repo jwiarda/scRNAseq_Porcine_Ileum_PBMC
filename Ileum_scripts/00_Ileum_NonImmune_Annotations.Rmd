@@ -1,0 +1,185 @@
+---
+title: "Annotation of Non-Leukocytes"
+author: "Jayne Wiarda"
+date: "03June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed non-leukocytes from porcine ileum using cell clustering and accompanying DGE and hierarchical clustering analyses. Based on these results, we create final annotations for our cells in this script.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019), ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020), dplyr (Wickham et al. 2020), readxl (Wickham & Bryan 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(readxl)
+```
+
+### Import relevant data
+
+Read in our Seurat object from previous analysis:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_NonImmuneOnly.rds')
+Idents(il) <- il$seurat_clusters
+```
+
+## Visualize our cell clusters and their relationships
+
+Start by re-visualizing clusters on a t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        reduction = 'tsne', 
+        group.by = 'neworder',
+        label = TRUE)
+```
+
+Then re-construct cluster heirarchy:
+
+```{r, warning = FALSE, error = FALSE}
+data.tree <- Tool(object = il, 
+                  slot = "BuildClusterTree") 
+data.tree <- ape::rotateConstr(data.tree, c('36', '45', '50'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+And also re-visualize DGE across clusters:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+DE <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/DE/NonImmuneOnly_OverallDE.txt')
+DE <- subset(DE, avg_logFC > 0) # only take genes enriched in the clusters 
+Idents(il) <- il$phyloorder
+topgenes <- DE %>% group_by(cluster) %>% top_n(5, avg_logFC) # only plot top 5 genes per cluster, as determined by highest average logFC values
+DoHeatmap(subset(il, downsample = 100), # take only 100 cells per cluster for plotting
+          features = as.character(topgenes$gene), 
+          assay = "RNA", 
+          disp.min = -1.5, 
+          disp.max = 3) +
+  scale_fill_gradientn(colors = c("darkturquoise", "grey90", "indianred1", "red"))
+```
+        
+## Visualize other key canonical genes
+
+Let's also visualize expression of a curated list of canonical genes for different non-leukocytes.
+
+Epithelial: EPCAM, KRT8, KRT20
+Stromal: COL3A1, CXCL14, CCL21, PECAM1
+
+Visualize in dot plot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+DotPlot(il, 
+        features = c('EPCAM', 'KRT8', 'KRT20', 
+                     'COL3A1', 'CXCL14', 'CCL21', 'PECAM1'), # high in mast cells
+        cols = c('gold', 'red')) + RotatedAxis()
+```
+
+Visualize in feature plots:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+FeaturePlot(il,
+            features = c('EPCAM', 'KRT8', 'KRT20', 
+                     'COL3A1', 'CXCL14', 'CCL21', 'PECAM1'),
+            reduction = 'tsne',
+            cols = c("grey90", "purple4"),
+            ncol = 3) & NoLegend() & NoAxes()
+```
+
+These gene expression profiles indicate clusters 36 & 45 to be epithelial cells and cluster 50 to be stromal cells.
+
+## Re-visualize data with new annotations
+
+Now let's add the new annotations to our meta data in the Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+bcs <- as.data.frame(colnames(il))
+colnames(bcs) <- 'barcode'
+bcs$cellID <- rep('_', nrow(bcs))
+df <- as.data.frame(il$seurat_clusters)
+# Cluster-based cell annotations not provided in the annotation .txt files:
+ep <- rownames(subset(df, il$seurat_clusters == '36' | il$seurat_clusters == '45'))
+stromal <- rownames(subset(df, il$seurat_clusters == '50'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ep, 'Epithelial cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% stromal, 'Stromal cells'))
+rownames(bcs) <- bcs$barcode
+bcs$barcode <- NULL
+il <- AddMetaData(il, metadata = bcs) # add new annotations to meta data slot
+```
+
+Let's plot new annotations in a t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        group.by = 'cellID', 
+        reduction = 'tsne', 
+        cols = c('chartreuse3', 'darkgreen'))
+```
+
+And let's also highlight only one cell populations at a time...
+
+Epithelial cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = ep, 
+        cols.highlight = "chartreuse3", 
+        sizes.highlight = 1,
+        cols = "grey80", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Stromal cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il, 
+        cells.highlight = stromal, 
+        cols.highlight = "darkgreen", 
+        sizes.highlight = 1,
+        cols = "grey80", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+### Save data
+
+Lastly, let's re-save our Seurat object with the new annotations stored in the cellID meta data slot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+Idents(il) <- il$cellID
+saveRDS(il, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_NonImmuneOnly.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham and Jennifer Bryan (2019). readxl: Read Excel Files. R package version 1.3.1.
+  https://CRAN.R-project.org/package=readxl
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1.
+  https://CRAN.R-project.org/package=scales
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation.
+  R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

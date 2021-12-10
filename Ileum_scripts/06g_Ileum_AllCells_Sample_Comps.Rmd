@@ -1,0 +1,729 @@
+---
+title: "Characterization of Ileal Cells: Sample Pseudobulk & Quality Comparisons"
+author: "Jayne Wiarda"
+date: "31Mar2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed scRNA-seq data from six porcine ileum samples through general data QC and pre-processing steps. At this point, we can start digging into the data more in order to form some biological interpretations! By the end of this analysis, we will be able to classify our cells into some general lineage designations, and we will also be able to see some biological differences occurring between different sample types. We will also be able to output lists of genes differentially expressed amongst clusters.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+Analyses are divided into sections as follows, and only one of these components is specified and included below:
+
+* General characterization of the data, where we visualize various metrics for our cells and/or clusters
+* Hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+* Cluster-based differential gene expression analysis to determine genes differentially expressed in a cluster relative to the rest of the dataset (cluster-based overall DGE) or in one cluster relative to another (cluster-based pairwise DGE)
+* Cluster-based pseudobulk correlation as another method to assess similarity/dissimilarity between pairwise cluster combinations
+* Tissue composition comparisons, to determine differences in the compositions of different cells and/or transcripts across different ileal sample types
+* Sample-specific quality comparisons, where we assess the whole transcriptomic profiles from each sample
+* Cluster-based gene set enrichment analysis, where we calculate enrichment of signatures for sorted immune cell populations from bulk RNA-seq datasets within our single-cell dataset
+
+This file specifically goes over sample-specific quality comparisons, where we assess the whole transcriptomic profiles from each sample.
+
+## Sample quality comparisons
+
+### Load required software packages
+
+Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Required packages: ggplot2 (Wickham 2016), Seurat (Stuart & Butler et al. 2019), DropletUtils (Lun et al. 2019; Griffiths et al. 2018); edgeR (Robinson et al. 2010; McCarthy et al. 2012)
+
+```{r, message = FALSE}
+library(ggplot2)
+library(DropletUtils) 
+library(edgeR)         
+library(Seurat)      
+```
+
+### Import relevant data 
+
+Read in the RDS file of processed (post-QC) data from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA"
+Idents(il) <- il$SampleID # change identity of each cell to correspond to sample ID
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:19
+```
+
+### Calculate hierarchical clustering of samples
+
+Build a phylogenetic tree, utilizing SampleID as our groups and using the pre-determined significant number of PCs to specify the dimensionality of our data to use:
+
+```{r, warning = FALSE, error = FALSE}
+il <- BuildClusterTree(il, 
+                       dims = PCdims, 
+                       assay = "PCA")
+```
+
+Now let's look at our cluster tree:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+PlotClusterTree(il, 
+                edge.width = 3) # plot tree with node labels
+```
+
+Let's remove node labels and plot the tree again:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- Tool(object = il, 
+                  slot = "BuildClusterTree") 
+ape::plot.phylo(x = data.tree, 
+                direction = "downwards", # plot the tree without node labels
+                edge.width = 1.5)
+```
+
+We see that NoPP samples seem to be very different from our IPP and X2I samples. 
+
+### Plot sample pseudobulk profiles
+
+Next, let's visualize the relationships amongst our samples by plotting pseudobulk profiles on a multidimensional scaling (MDS) plot
+
+We start by calculating sample-specific pseudobulk profiles:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+sample.averages <- AverageExpression(il, return.seurat = TRUE) # create in-silico bulk RNA-seq dataset for each sample
+counts <- as.matrix(sample.averages@assays$RNA@data)
+```
+
+Next, we plot our pseudobulk samples on an MDS plot:
+
+```{r, warning = FALSE, error = FALSE}
+DGE <- DGEList(counts = counts, genes = rownames(counts), group = colnames(counts)) # make into edgeR DGE object
+plotMDS(DGE, 
+        top = length(rownames(sample.averages[["RNA"]])), #consider all genes 
+        col = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange", "deepskyblue4", "deepskyblue3"),
+        pch = 15,
+        cex = 3)
+legend("bottom",
+       legend = c("Pig 1 IPP", "Pig 2 IPP", "Pig 1 NoPP", "Pig 2 NoPP", "Pig 1 Whole Ileum", "Pig 2 Whole Ileum"),
+       col = c("chartreuse4", "chartreuse3", "darkorange3", 
+               "darkorange", "deepskyblue4", "deepskyblue3"),
+       pch = 15,
+       cex = 1)
+```
+
+### Save the pseudobulk counts from processed data
+
+```{r, warning = FALSE, error = FALSE}
+write.table(counts, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Pseudobulk/ProcessedSamples_Pseudobulk_AvGeneCounts.xlsx')
+```
+
+### Plot sample pseudobulk profiles for raw data (pre-QC)
+
+We can see from the MDS above that the NoPP samples are still very different from IPP and X2I samples. We also noticed in preceding analyses that fewer cells from NoPP samples passed all of our QC checks to be included in the final dataset. Out of curiosity, let's also create an MDS plot of our 6 samples with pseudobulk profiles derived from completely raw data that hasn't undergone any QC yet.
+       
+Start by importing in our raw data:
+
+```{r, warning = FALSE, error = FALSE}
+data_dir <- c(IPP1 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/IPP1/raw_feature_bc_matrix", # specify paths to raw/unfiltered output files from each sample 
+              IPP2 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/IPP2/raw_feature_bc_matrix", 
+              NoPP1 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/NoPP1/raw_feature_bc_matrix", 
+              NoPP2 = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/NoPP2/raw_feature_bc_matrix", 
+              X2I1= "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/X2I1/raw_feature_bc_matrix", 
+              X2I2= "/home/Jayne.Wiarda/scRNAseqIleumAtlas/CellRanger/X2I2/raw_feature_bc_matrix")
+library_id <- c("IPP1", "IPP2", "NoPP1", "NoPP2","X2I1", "X2I2") # set the Sample IDs to use (in same order as in data_dir)
+#lapply(data_dir, dir) # Should show barcodes.tsv.gz, genes.tsv.gz, and matrix.mtx.gz for each sample listed
+```
+
+Make a Seurat object from the data:
+
+```{r, warning = FALSE, error = FALSE}
+scRNA_data <- Read10X(data.dir = data_dir) # read the 10X data from all samples into a data matrix
+seurat_object = CreateSeuratObject(counts = scRNA_data, # create a Seurat object of the data matrix
+                                   min.cells = 1) # gene must be expressed in at least 1 cell to be included
+```
+
+Normalize our gene counts:
+
+```{r, warning = FALSE, error = FALSE}
+seurat_object <- NormalizeData(seurat_object,  # normalize the RNA counts data per cell
+                                normalization.method = "LogNormalize", 
+                                scale.factor = 10000, 
+                                assay = "RNA")
+```
+
+Create our pseudobulk profiles for each sample:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+Idents(seurat_object) <- seurat_object$orig.ident
+DefaultAssay(seurat_object) <- "RNA"
+sample.averages <- AverageExpression(seurat_object, return.seurat = TRUE) # create in-silico bulk RNA-seq dataset for each sample
+counts <- as.matrix(sample.averages@assays$RNA@data)
+```
+
+Next, we plot our pseudobulk samples on an MDS plot:
+
+```{r, warning = FALSE, error = FALSE}
+DGE <- DGEList(counts = counts, genes = rownames(counts), group = colnames(counts)) # make into edgeR DGE object
+plotMDS(DGE, 
+        top = length(rownames(sample.averages[["RNA"]])), #consider all genes 
+        col = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange", "deepskyblue4", "deepskyblue3"),
+        pch = 15,
+        cex = 3)
+legend("bottom",
+       legend = c("Pig 1 IPP", "Pig 2 IPP", "Pig 1 NoPP", "Pig 2 NoPP", "Pig 1 Whole Ileum", "Pig 2 Whole Ileum"),
+       col = c("chartreuse4", "chartreuse3", "darkorange3", 
+               "darkorange", "deepskyblue4", "deepskyblue3"),
+       pch = 15,
+       cex = 1)
+```
+
+### Save the pseudobulk counts from raw data
+
+```{r, warning = FALSE, error = FALSE}
+write.table(counts, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Pseudobulk/RawSamples_Pseudobulk_AvGeneCounts.xlsx')
+```
+
+### Overlay epithelial vs immune gene expression onto QC viability plots
+
+As noted above, many more cells are excluded from the final dataset in NoPP samples because they don't pass QC checks in preceding steps. We also noticed from previous analyses that about thrice the proportion of non-immune cells are located in NoPP compared to IPP and X2I samples in our final dataset, and we further found that 2 of the 3 clusters of non-immune cells expressed genes characteristics of epithelial cells, such as EPCAM and KRT8. 
+What we want to know is if more cells are filtered out of NoPP samples because of an increased presence of epithelial cells. We know that epithelial cells are notoriously hard to isolate and keep 'happy' once tissues are dissociated, so it seems likely that isolated epithelial cells are likely filtered out in QC steps, such as exluding cells with a high percentage of mitochondrial reads. We therefore can overlay gene expression for some epithelial-specific genes or immune cell-specific genes onto QC plots that we utilized to set our QC thresholds for the percentage of mitochondrial reads we deemed acceptable for cells in our final dataset (which was < 12.5%).
+
+To start, we need to bring in a Seurat object that contains all of our cells prior to QC filtering but after ambient RNA corrections:
+
+```{r, warning = FALSE, error = FALSE}
+ilQC <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/QC/IleumQC.rds")
+```
+
+Next, we can overlay raw counts of different genes onto the viability plots (% mito reads vs. # genes detected) of cells in our samples.
+
+Overlay of epithelial-specific EPCAM expression:
+```{r, warning = FALSE, error = FALSE}
+ilQCIPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP1",]
+dim(ilQCIPP1)
+IPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP1)]
+EPCAM <- IPP1counts[rownames(IPP1counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCIPP1, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP1 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP1",]
+dim(ilQCNoPP1)
+NoPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP1)]
+EPCAM <- NoPP1counts[rownames(NoPP1counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCNoPP1, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP1 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I1",]
+dim(ilQCX2I1)
+X2I1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I1)]
+EPCAM <- X2I1counts[rownames(X2I1counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCX2I1, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I1 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCIPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP2",]
+dim(ilQCIPP2)
+IPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP2)]
+EPCAM <- IPP2counts[rownames(IPP2counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCIPP2, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP2 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP2",]
+dim(ilQCNoPP2)
+NoPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP2)]
+EPCAM <- NoPP2counts[rownames(NoPP2counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCNoPP2, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP2 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I2",]
+dim(ilQCX2I2)
+X2I2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I2)]
+EPCAM <- X2I2counts[rownames(X2I2counts) == "EPCAM",]
+for(i in 1:length(EPCAM) ){ if(EPCAM[i] > 3){ EPCAM[i] = 3 } } 
+ggplot(ilQCX2I2, aes(x=prcntMito, y=GenesDetected, color = EPCAM))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I2 - EPCAM")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+```
+
+Overlay of epithelial-specific KRT8 expression:
+```{r, warning = FALSE, error = FALSE}
+ilQCIPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP1",]
+dim(ilQCIPP1)
+IPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP1)]
+KRT8 <- IPP1counts[rownames(IPP1counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCIPP1, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP1 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP1",]
+dim(ilQCNoPP1)
+NoPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP1)]
+KRT8 <- NoPP1counts[rownames(NoPP1counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCNoPP1, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP1 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I1",]
+dim(ilQCX2I1)
+X2I1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I1)]
+KRT8 <- X2I1counts[rownames(X2I1counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCX2I1, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I1 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCIPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP2",]
+dim(ilQCIPP2)
+IPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP2)]
+KRT8 <- IPP2counts[rownames(IPP2counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCIPP2, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP2 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP2",]
+dim(ilQCNoPP2)
+NoPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP2)]
+KRT8 <- NoPP2counts[rownames(NoPP2counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCNoPP2, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP2 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I2",]
+dim(ilQCX2I2)
+X2I2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I2)]
+KRT8 <- X2I2counts[rownames(X2I2counts) == "KRT8",]
+for(i in 1:length(KRT8) ){ if(KRT8[i] > 3){ KRT8[i] = 3 } } 
+ggplot(ilQCX2I2, aes(x=prcntMito, y=GenesDetected, color = KRT8))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I2 - KRT8")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+```
+
+Overlay of leukocyte-specific PTPRC (encodes CD45) expression:
+```{r, warning = FALSE, error = FALSE}
+ilQCIPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP1",]
+dim(ilQCIPP1)
+IPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP1)]
+PTPRC <- IPP1counts[rownames(IPP1counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCIPP1, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP1 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP1",]
+dim(ilQCNoPP1)
+NoPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP1)]
+PTPRC <- NoPP1counts[rownames(NoPP1counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCNoPP1, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP1 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I1",]
+dim(ilQCX2I1)
+X2I1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I1)]
+PTPRC <- X2I1counts[rownames(X2I1counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCX2I1, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I1 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCIPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP2",]
+dim(ilQCIPP2)
+IPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP2)]
+PTPRC <- IPP2counts[rownames(IPP2counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCIPP2, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP2 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP2",]
+dim(ilQCNoPP2)
+NoPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP2)]
+PTPRC <- NoPP2counts[rownames(NoPP2counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCNoPP2, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP2 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I2",]
+dim(ilQCX2I2)
+X2I2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I2)]
+PTPRC <- X2I2counts[rownames(X2I2counts) == "PTPRC",]
+for(i in 1:length(PTPRC) ){ if(PTPRC[i] > 3){ PTPRC[i] = 3 } } 
+ggplot(ilQCX2I2, aes(x=prcntMito, y=GenesDetected, color = PTPRC))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I2 - PTPRC")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+```
+
+Overlay of T/ILC-specific CD3G expression:
+```{r, warning = FALSE, error = FALSE}
+ilQCIPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP1",]
+dim(ilQCIPP1)
+IPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP1)]
+CD3G <- IPP1counts[rownames(IPP1counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCIPP1, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP1 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP1",]
+dim(ilQCNoPP1)
+NoPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP1)]
+CD3G <- NoPP1counts[rownames(NoPP1counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCNoPP1, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP1 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I1",]
+dim(ilQCX2I1)
+X2I1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I1)]
+CD3G <- X2I1counts[rownames(X2I1counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCX2I1, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I1 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCIPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP2",]
+dim(ilQCIPP2)
+IPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP2)]
+CD3G <- IPP2counts[rownames(IPP2counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCIPP2, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP2 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP2",]
+dim(ilQCNoPP2)
+NoPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP2)]
+CD3G <- NoPP2counts[rownames(NoPP2counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCNoPP2, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP2 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I2",]
+dim(ilQCX2I2)
+X2I2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I2)]
+CD3G <- X2I2counts[rownames(X2I2counts) == "CD3G",]
+for(i in 1:length(CD3G) ){ if(CD3G[i] > 3){ CD3G[i] = 3 } } 
+ggplot(ilQCX2I2, aes(x=prcntMito, y=GenesDetected, color = CD3G))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I2 - CD3G")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+```
+
+Overlay of B cell-specific CD79B expression:
+```{r, warning = FALSE, error = FALSE}
+ilQCIPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP1",]
+dim(ilQCIPP1)
+IPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP1)]
+CD79B <- IPP1counts[rownames(IPP1counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCIPP1, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP1 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP1",]
+dim(ilQCNoPP1)
+NoPP1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP1)]
+CD79B <- NoPP1counts[rownames(NoPP1counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCNoPP1, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP1 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I1 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I1",]
+dim(ilQCX2I1)
+X2I1counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I1)]
+CD79B <- X2I1counts[rownames(X2I1counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCX2I1, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I1 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCIPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "IPP2",]
+dim(ilQCIPP2)
+IPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCIPP2)]
+CD79B <- IPP2counts[rownames(IPP2counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCIPP2, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("IPP2 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCNoPP2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "NoPP2",]
+dim(ilQCNoPP2)
+NoPP2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCNoPP2)]
+CD79B <- NoPP2counts[rownames(NoPP2counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCNoPP2, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("NoPP2 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+
+ilQCX2I2 <- ilQC$phenoData[ilQC$phenoData$SampleID == "X2I2",]
+dim(ilQCX2I2)
+X2I2counts <- ilQC$counts[,colnames(ilQC$counts) %in% rownames(ilQCX2I2)]
+CD79B <- X2I2counts[rownames(X2I2counts) == "CD79B",]
+for(i in 1:length(CD79B) ){ if(CD79B[i] > 3){ CD79B[i] = 3 } } 
+ggplot(ilQCX2I2, aes(x=prcntMito, y=GenesDetected, color = CD79B))+  geom_point() +
+  ylab("#Genes detected per cell") + xlab("%Mito") + ggtitle("X2I2 - CD79B")+
+  scale_colour_gradient(low = "beige", high = "red") + xlim(0, 1) + ylim (0, 5000) + theme(
+    panel.background = element_rect(fill = "gray80",
+                                    colour = "gray80",
+                                    size = 0.1, linetype = "solid"),
+    panel.grid.major = element_line(size = 0.5, linetype = 'solid',
+                                    colour = "gray70"), 
+    panel.grid.minor = element_line(size = 0.25, linetype = 'solid',
+                                    colour = "gray70"))
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Griffiths JA, Richard AC, Bach K, Lun ATL, Marioni JC (2018). “Detection and removal of barcode swapping in single-cell RNA-seq data.”
+_Nat. Commun._, *9*(1), 2667. doi: 10.1038/s41467-018-05083-x (URL: https://doi.org/10.1038/s41467-018-05083-x).
+
+Lun ATL, Riesenfeld S, Andrews T, Dao T, Gomes T, participants in the 1st Human Cell Atlas Jamboree, Marioni JC (2019). “EmptyDrops:
+distinguishing cells from empty droplets in droplet-based single-cell RNA sequencing data.” _Genome Biol._, *20*, 63. doi:
+10.1186/s13059-019-1662-y (URL: https://doi.org/10.1186/s13059-019-1662-y).
+
+McCarthy DJ, Chen Y and Smyth GK (2012). Differential expression analysis of multifactor RNA-Seq experiments with respect to biological variation. Nucleic Acids Research 40, 4288-4297
+
+Robinson MD, McCarthy DJ and Smyth GK (2010). edgeR: a Bioconductor package for differential expression analysis of digital gene expression data. Bioinformatics 26, 139-140
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+

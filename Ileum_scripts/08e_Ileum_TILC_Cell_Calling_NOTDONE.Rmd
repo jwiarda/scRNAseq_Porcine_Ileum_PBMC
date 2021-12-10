@@ -1,0 +1,128 @@
+---
+title: "Characterization of Ileal T Cells & Innate Lymphoid Cells: Overall Interpretations & Cell Calling"
+author: "Jayne Wiarda"
+date: "1Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created a data subset consisting of only T/ILC lineage lymphocytes and performed further analyses to characterize the data. Let's now visualize the data a few other ways and finally decide on more highly-resolved cell identites.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+In this analysis, we end up classifying our T/ILC lineage lymphocytes into groupings as follows:
+
+* CD4 ab T cells = clusters 12, 15, 26, 41, 46
+* Mixed CD4 & CD8 ab T cells (naive) = cluster 24
+* CD8 ab T cells = clusters 3, 7, 14, 17, 37
+* Mixed gd & CD8 ab T cells = clusters 19, 34, 35, 47
+* gd T cells = clusters 6, 23, 29, 31, 32, 51
+* ILCs = clusters 1, 18, 43, 44, 53
+
+## Overall Interpretations & Cell Calling
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilT <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds") 
+DefaultAssay(ilT) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(ilT) <- ilT$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:10
+```
+
+### Not done, but include all the following:
+
+# Plot some canonical T cell genes:
+FeaturePlot(ilT,
+            features = c('CD4', 'CD8B', 'TRDC', 'CD3E', 'CD2', 'CD8A'),
+            reduction = 'tsne',
+            cols = c("grey90", "purple4"),
+            ncol = 3) & NoLegend() & NoAxes()
+
+DotPlot(ilT, 
+        features = c('CD4', 'CD8B', 'TRDC', 'CD3E', 'CD2', 'PTPRC', 'CD79A', 'ENSSSCG00000028461'), 
+        cols = c("gold", "red"), 
+        col.min = -1, 
+        col.max = 2,
+        dot.scale = 6,
+        assay = "RNA") +
+  RotatedAxis()
+
+# Reorder cells:
+Idents(ilT) <- ilT$seurat_clusters
+levels(ilT) <- c('12', '15', '26', '41', '46', 
+                 '24', 
+                 '3', '7', '14', '17', '37',
+                 '19', '34', '35', '47',
+                 '6', '23', '29', '31', '32', '51',
+                 '1', '18', '43', '44', '53') # Reorder the clusters based on putative cell type IDs we came up with from looking at the data
+ilT$neworder <- Idents(ilT)
+Idents(ilT) <- ilT$neworder
+
+DotPlot(ilT, 
+        features = c('CD4', 'CD8B', 'TRDC', 'CD3E', 'CD2', 'CD8A', 'PTPRC', 'CD79A', 'ENSSSCG00000028461'), 
+        cols = c("gold", "red"), 
+        col.min = -1, 
+        col.max = 2,
+        dot.scale = 6,
+        assay = "RNA",
+        group.by = 'neworder') +
+  RotatedAxis()
+
+Idents(ilT) <- ilT$neworder
+TILCtypes <- c(rep('CD4 ab T cell', 5), 'CD4/CD8 mix', rep('CD8 ab T cell', 5),
+  rep('CD8/gd mix', 4), rep('gd T cell', 6), 
+  rep('ILC', 5)) # Rename clusters based on phenotype IDs
+ilT$TILCtypes <- ilT$neworder
+Idents(ilT) <- ilT$TILCtypes
+names(TILCtypes) <- levels(ilT) # assign TILCtypes to cluster numbers
+ilT <- RenameIdents(ilT, TILCtypes) # change dataset identity to cell types in new Seurat object
+ilT$TILCtypes <- Idents(ilT)
+
+DimPlot(ilT,
+        reduction = 'tsne',
+        group.by = 'TILCtypes', 
+        cols = c('violetred', 'darkorange', 'gold', 'limegreen', 'dodgerblue3', 'purple4'))
+
+### Assign cell identities:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(ilT, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

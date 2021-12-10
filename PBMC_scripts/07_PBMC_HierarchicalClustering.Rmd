@@ -1,0 +1,166 @@
+---
+title: "Characterization of PBMCs: General Characterization"
+author: "Jayne Wiarda"
+date: "16Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed scRNA-seq data from two PBMC samples through general data QC and pre-processing steps, mirroring analyses done on ileum samples from the same animals. At this point, we can start digging into the data more in order to form some biological interpretations! Specifically, we want to identify clusters of ILCs, using the same criteria as used for identification of ILCs in ileum. 
+
+We have 2 samples, with nomenclature as follows:
+
+* PBMC1 = peripheral blood mononuclear cells collected from Pig 1
+* PBMC2 = peripheral blood mononuclear cells collected from Pig 2
+
+Analyses are divided into sections as follows, and only one of these components is specified and included below:
+
+* General characterization of the data, where we visualize various metrics for our cells and/or clusters
+* Hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+* Cluster-based differential gene expression analysis to determine genes differentially expressed in a cluster relative to the rest of the dataset (cluster-based overall DGE) or in one cluster relative to another (cluster-based pairwise DGE)
+* Cluster-based pseudobulk correlation as another method to assess similarity/dissimilarity between pairwise cluster combinations
+
+This file specifically goes over hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+
+## Hierarchical clustering of cell clusters
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+pbmc <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Seurat/PBMC.rds") 
+DefaultAssay(pbmc) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(pbmc) <- pbmc$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:10
+```
+
+### Calculate hierarchical clustering
+
+Build a phylogenetic tree, utilizing seurat_clusters as our groups and using the pre-determined significant number of PCs to specify the dimensionality of our data to use:
+
+```{r, warning = FALSE, error = FALSE}
+pbmc <- BuildClusterTree(pbmc, 
+                       dims = PCdims, 
+                       assay = "PCA")
+```
+
+Now let's look at our cluster tree:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+PlotClusterTree(pbmc, 
+                edge.width = 3) # plot tree with node labels
+```
+
+Let's remove node labels and plot the tree again:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- Tool(object = pbmc, 
+                  slot = "BuildClusterTree") 
+ape::plot.phylo(x = data.tree, 
+                direction = "downwards", # plot the tree without node labels
+                edge.width = 1.5)
+```
+
+Let's reorder some of the branches while still maintaining our heirarchy:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- ape::rotateConstr(data.tree, c('p3', 'p20', 'p15', 'p18', 'p27', 'p19', 
+                      'p11', 'p6', 'p7', 'p2', 'p33', 'p29', 'p5', 
+                      'p31', 'p22', 'p8', 'p25', 'p1', 'p21', 'p24',
+                      'p32', 'p13', 'p10', 'p14', 'p23', 'p16', 'p9', 
+                      'p28', 'p0', 'p4', 'p30', 'p26', 'p12', 'p17'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+For future analyses, we may want to order our clusters by this phylogenetic order, so let's store that information in a metadata slot for our Seurat object, called 'phyloorder':
+
+```{r, warning = FALSE, error = FALSE}
+levels(pbmc) <- rev(c('p3', 'p20', 'p15', 'p18', 'p27', 'p19', 
+                      'p11', 'p6', 'p7', 'p2', 'p33', 'p29', 'p5', 
+                      'p31', 'p22', 'p8', 'p25', 'p1', 'p21', 'p24',
+                      'p32', 'p13', 'p10', 'p14', 'p23', 'p16', 'p9', 
+                      'p28', 'p0', 'p4', 'p30', 'p26', 'p12', 'p17')) 
+pbmc$phyloorder <- Idents(pbmc)
+```
+
+### Remake some figures
+
+Let's remake some figures from previous general characterization, now utilizing our new phylogenetic ordering of clusters.
+
+Remake dot plot to summarize how many cells express a gene in each cluster and at what relative level... use gene panel used to ID ILCs:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 12}
+Idents(pbmc) <- pbmc$phyloorder
+DotPlot(pbmc, 
+        features = c('PTPRC', 'CD19', 'CD79A', 'CD79B', 'MS4A1', 'JCHAIN', 'CD3E', 'CD3G', 'CD2', 'CD8A',  'TRDC', 'CD4', 'CD8B', 'ENSSSCG00000028461', 'CD68', 'CSF2RB', 'ICAM1'),
+        cols = c("gold", "red"), 
+        col.min = -1, 
+        col.max = 2,
+        dot.scale = 6,
+        assay = "RNA",
+        group.by = "seurat_clusters") +
+  RotatedAxis()
+```
+
+From this analysis, we conclude that clusters p0, p4, p26, p28, and p30 are our ILC clusters, as they fit the phenotype of CD45+CD79a-CD3e-CD2+CD172a-, plus they lack expression of T cell markers CD4, CD8b, TRDC, but do express NK marker CD8A. We also note they cluster close with T cell clusters (CD3E+) in our hierarchy.
+
+Remake stacked barplot:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(pbmc) <- pbmc$phyloorder
+GutSampleTotalCells <- prop.table(table(pbmc$SampleID)) # What percent of total cells are from each sample?
+GutSamplePercents <- prop.table(table(Idents(pbmc),pbmc$SampleID), 
+                                margin = 1) # What percent of cells from each cluster belong to each sample?
+GutSamplePercents <- rbind(GutSamplePercents, GutSampleTotalCells) # add row of overall percentages to table
+#rowSums(GutSamplePercents) # make sure all are equal to 1
+GutSamplePercents <- t(GutSamplePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutSamplePercents, # create stacked bar plot
+        col = c("red", "dodgerblue3"), 
+        legend = rownames(GutSamplePercents),
+        xlab = "Cluster #", 
+        ylab = "Frequency within cluster", 
+        las = 2,
+        border = NA,
+        space = 0.05,
+        legend.text = TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(pbmc, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Seurat/PBMC.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

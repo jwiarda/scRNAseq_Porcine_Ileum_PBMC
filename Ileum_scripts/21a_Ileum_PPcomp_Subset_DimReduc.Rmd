@@ -1,0 +1,315 @@
+---
+title: "Creation of a Seurat Object for Differential Abundance Analysis"
+author: "Jayne Wiarda"
+date: "20June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Create a Seurat object containing cells from non-PP only and PP only samples. Re-calculate PCA while maintaining the previous UMAP/t-SNE dimensions from when all ileal cells/samples were present
+
+## Data Subsetting, Normalization, Integration, & Dimensionality Reduction
+
+### Load required software packages
+
+The following analyses are conducted primarily using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). To run some of these functions more quickly, we also utilize parallelization with the software package, future (Bengtsson 2020). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: ggplot2 (Wickham 2016), writexl (Ooms 2020), scales (Wickham & Seidel 2020), tidyr (Wickham 2020), dplyr (Wickham et al. 2020)
+
+```{r, message = FALSE}
+library(Seurat)  
+library(writexl)        
+library(scales)
+library(ggplot2)
+library(future)
+library(tidyr)
+library(dplyr)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll_FINALannot.rds") 
+DefaultAssay(il) <- "RNA"
+```
+
+### Allow parallelization 
+
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+### Subset data
+
+Create a subset of data containing only IPP/NoPP cells:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(il) <- il$tissue
+il <- subset(il, idents = c('IPP', 'NoP')) # create a new dataset of only cells from IPP and NoPP samples
+```
+
+### Remove unnecessary data
+
+Get rid of unnecessary meta data:
+
+```{r, warning = FALSE, error = FALSE}
+il@meta.data <- il@meta.data %>% select(SampleID, cellID, tissue)
+```
+
+Identify genes with non-zero expression to keep:
+
+```{r, warning = FALSE, error = FALSE}
+counts <- as.data.frame(il[['RNA']]@counts)
+keep <- rowSums(counts) > 0
+keep <- rownames(counts[keep,])
+```
+
+Slim down our seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+il <- DietSeurat(il, 
+                  counts = TRUE,
+                  data = TRUE,
+                  scale.data = FALSE, # remove the scaled data
+                  dimreducs = c('umap', 'tsne'),
+                  features = keep, # keep only genes with non-zero counts across all cells
+                  assays = 'RNA') # keep only RNA assay and remove SCT and integrated
+```
+
+### Re-normalize the data
+
+Re-perform SCTransform on each individual sample:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+il.list <- SplitObject(il, split.by = "SampleID") # split by sample IDs
+il.list <- il.list[c("IPP1", "IPP2", "NoPP1", "NoPP2")] 
+for (i in 1:length(il.list)) { # normalize data using SCTransform method
+  il.list[[i]] <- SCTransform(il.list[[i]], 
+                               return.only.var.genes = FALSE, 
+                               verbose = TRUE) 
+}
+```
+
+### Re-integrate the data
+
+Re-integrate samples based on re-calculated SCT assays:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+il.features <- SelectIntegrationFeatures(il.list, # select the genes to use for integration
+                                          verbose = TRUE) 
+il.list <- PrepSCTIntegration(il.list, 
+                               anchor.features = il.features,
+                               verbose = TRUE)
+il.anchors <- FindIntegrationAnchors(il.list, # identify anchors for integration from top 30 PCs
+                                      normalization.method = "SCT", 
+                                      anchor.features = il.features, 
+                                      dims = 1:30)
+il.integrated <- IntegrateData(il.anchors, # integrate data
+                                normalization.method = "SCT", 
+                                dims = 1:30)
+```
+
+### Re-run PCA analysis
+
+Calculate the PCs of the integrated dataset:
+
+```{r, warning = FALSE, error = FALSE, messge = FALSE}
+il.integrated <- RunPCA(il.integrated, # run PCA analysis for 100 dimensions of the data
+                         npcs = 100, 
+                         verbose = TRUE) 
+```
+
+Visualize our PCs in an elbow plot:
+
+```{r, warning = FALSE, error = FALSE}
+ElbowPlot(il.integrated,
+          ndims = 100) # look at this plot to find the 'elbow' for significant PCs... use this number of PCs for creating UMAP, tSNE, & cell neighbors & clustering
+```
+
+Quantitiatively calculate how many PCs to use:
+
+```{r, warning = FALSE, error = FALSE}
+pct <- il.integrated[["pca"]]@stdev / sum(il.integrated[["pca"]]@stdev) * 100 # find standard deviation for each PC
+cumu <- cumsum(pct) # find cumulative percentages for PCs
+co1 <- which(cumu > 90 & pct < 5)[1] # find PC representing cumulative percent >90% and less than 5% associated with the single PC
+co1 # list PC
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1 # find last PC where change in percent variation is more than 0.1%
+co2 # list PC
+pcs <- min(co1, co2) # find the minimum PC from the 2 methods used above
+pcs # list PC
+```
+
+Plot our findings:
+
+```{r, warning = FALSE, error = FALSE}
+plot_df <- data.frame(pct = pct, # put PC values into dataframe for plotting
+                      cumu = cumu, 
+                      rank = 1:length(pct))
+ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + # visualize PCs to use in elbow plot
+  geom_text() + 
+  geom_vline(xintercept = 90, color = "grey") + 
+  geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+  theme_bw()
+```
+
+Store information for PCs to use in future computations:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:pcs 
+PCdims
+```
+
+### Find nearest neighbors
+
+Find nearest neighbors that will be needed for differential abundance analysis:
+
+```{r, warning = FALSE, error = FALSE}
+il.integrated <- FindNeighbors(il.integrated, 
+                                dims = PCdims, 
+                                verbose = FALSE)
+```
+
+### Plot UMAP and t-SNE plots
+
+Use coordinates from original Seurat object that also contained cells from X2I (whole ileum) samples.
+
+Rearrange order of cell IDs:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(il.integrated) <- il.integrated$cellID
+levels(il.integrated) <- c('Naive CD4/CD8 ab T cells', 'Follicular CD4 ab T cells', 'Activated CD4 ab T cells', 
+                'Cycling CD4 ab T cells', 'Activated CD8 ab T cells', 'Cytotoxic CD8 ab T cells',
+                'Cycling CD8 ab T cells', 'Activated gd T cells', 'Cytotoxic gd T cells', 
+                'Cycling gd T cells', 'SELLhi gd T cells', 'CD2neg GD T cells', 'Activated group 1 ILCs',
+                'Cytotoxic group 1 ILCs', 'Cycling group 1 ILCs', 'Group 3 ILCs', 
+                'Antibody-secreting cells', 'Transitioning B cells', 'Resting B cells', 
+                'Cycling B cells', 'Activated B cells','Dendritic cells', 'Macrophages',
+                'Mast cells', 'Epithelial cells', 'Stromal cells')
+il.integrated$cellID <- Idents(il.integrated)
+```
+
+Add back in original coordinates for cells:
+
+```{r, warning = FALSE, error = FALSE}
+DefaultAssay(il.integrated) <- 'RNA'
+umap <- il@reductions$umap@cell.embeddings
+il.integrated[["umap_allCells"]] <- CreateDimReducObject(embeddings = umap, 
+                                                         key = "UMAP_", 
+                                                         assay = DefaultAssay(il.integrated))
+tsne <- il@reductions$tsne@cell.embeddings
+il.integrated[["tsne_allCells"]] <- CreateDimReducObject(embeddings = tsne, 
+                                                         key = "tSNE_", 
+                                                         assay = DefaultAssay(il.integrated))
+```
+
+Plot UMAP with cell IDs at old coordinates:
+  
+```{r, warning = FALSE, error = FALSE}
+cols <- c('lightcoral', 'pink', 'violetred1', 'violetred4', 'yellow', 'goldenrod1', 
+          'yellow4', 'darkorange', 'darkorange3', 'chocolate4', 'tan', 'sandybrown', 
+          'red', 'indianred1', 'darkred', 'black', 'darkslateblue', 'mediumorchid', 
+          'plum4', 'mediumpurple1', 'magenta4', 'cornflowerblue', 'cyan4', 'blue', 
+          'chartreuse3', 'darkgreen')
+DimPlot(il.integrated, 
+        label = FALSE,
+        reduction = 'umap_allCells',
+        group.by = "cellID",
+        cols = cols) # view UMAP plot
+```
+
+Plot t-SNE with cell IDs at old coordinates:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il.integrated, 
+        label = FALSE,
+        reduction = 'tsne_allCells',
+        group.by = "cellID",
+        cols = cols) # view t-SNE plot
+```
+
+Plot UMAP with sample IDs at old coordinates:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il.integrated, 
+        label = FALSE,
+        reduction = 'umap_allCells',
+        group.by = "SampleID",
+        cols = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange")) # view t-SNE plot
+```
+
+Plot t-SNE with sample IDs at old coordinates:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(il.integrated, 
+        label = FALSE,
+        reduction = 'tsne_allCells',
+        group.by = "SampleID",
+        cols = c("chartreuse4", "chartreuse3", "darkorange3", 
+                "darkorange")) # view t-SNE plot
+```
+
+### Add normalized and scaled data to the RNA assay
+
+At this point, our Seurat object has three 'assays', where we store counts information. The SCT assay has counts normalized and scaled with SCTransform, the integration assay has counts data used to integrate data, and the RNA assay, which at this point, still needs to be normalized and scaled.
+
+Since it's still recommended to use RNA counts rather than SCT counts for many downstream analyses, we need to normalize and scale our raw RNA counts.
+
+Normalize the RNA data with standard log normalization:
+
+```{r, warning = FALSE, error = FALSE}
+il.integrated <- NormalizeData(il.integrated,  
+                                normalization.method = "LogNormalize", 
+                                scale.factor = 10000, 
+                                assay = "RNA") # if you get a warning about not setting future seed, this should be fine since a seed is not set for normalization
+```
+
+Scale the RNA data: 
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+il.integrated <- ScaleData(il.integrated, 
+                            assay = "RNA")
+```
+
+See that we now have scaled RNA data:
+
+```{r, warning = FALSE, error = FALSE}
+dim(il.integrated[["RNA"]]@scale.data) 
+```
+
+### Save the Seurat object:
+
+Now, importantly, we save our Seurat object as an .rds. We will end up importing the .rds back into R for many downstream analyses.
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+DefaultAssay(il.integrated) <- 'RNA'
+saveRDS(il.integrated, file = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll_PPsubset.rds") # save .rds file
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+  
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2.
+  https://CRAN.R-project.org/package=tidyr
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data
+  Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

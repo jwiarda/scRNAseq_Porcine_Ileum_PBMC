@@ -1,0 +1,268 @@
+---
+title: "Characterization of PBMCs: General Characterization"
+author: "Jayne Wiarda"
+date: "16Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now processed scRNA-seq data from two PBMC samples through general data QC and pre-processing steps, mirroring analyses done on ileum samples from the same animals. At this point, we can start digging into the data more in order to form some biological interpretations! Specifically, we want to identify clusters of ILCs, using the same criteria as used for identification of ILCs in ileum. 
+
+We have 2 samples, with nomenclature as follows:
+
+* PBMC1 = peripheral blood mononuclear cells collected from Pig 1
+* PBMC2 = peripheral blood mononuclear cells collected from Pig 2
+
+Analyses are divided into sections as follows, and only one of these components is specified and included below:
+
+* General characterization of the data, where we visualize various metrics for our cells and/or clusters
+* Hierarchical clustering of the data to determine phylogenetic relationship amongst cell clusters
+* Cluster-based differential gene expression analysis to determine genes differentially expressed in a cluster relative to the rest of the dataset (cluster-based overall DGE) or in one cluster relative to another (cluster-based pairwise DGE)
+* Cluster-based pseudobulk correlation as another method to assess similarity/dissimilarity between pairwise cluster combinations
+
+This file specifically goes over general characterization of our dataset.
+
+## General characterization of the data
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+pbmc <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Seurat/PBMC.rds") 
+DefaultAssay(pbmc) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(pbmc) <- pbmc$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:10
+```
+
+### Change cluster IDs
+
+Let's add a 'p' in front of every cluster number so we don't get these confused with ileum cluster IDs:
+
+```{r, warning = FALSE, error = FALSE}
+pbmc$seurat_clusters <- paste("p", pbmc$seurat_clusters, sep = "") # add a p to the name of each cluster to distinguish from the ileum dataset
+Idents(pbmc) <- pbmc$seurat_clusters
+numbers <- 0:33
+numbers <- paste("p", numbers, sep = "")
+levels(pbmc) <- c(numbers) # Reorder the clusters based on putative cell type IDs we came up with from looking at the data
+pbmc$seurat_clusters <- Idents(pbmc)
+```
+
+### Visualize the data
+
+Visualize by UMAP dimensionality reduction:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(pbmc, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "seurat_clusters",
+        label.size = 4) 
+```
+
+Visualize by t-SNE dimensionality reduction:
+```{r, warning = FALSE, error = FALSE}
+DimPlot(pbmc, 
+        label = TRUE,
+        reduction = 'tsne',
+        group.by = "seurat_clusters",
+        label.size = 4) 
+```
+In our future analyses, we will utilize the UMAP plot to visualize our entire PBMC dataset, as UMAP tends to capture global relationships better than t-SNE.
+
+### Further QC visualization
+
+Let's look at some of our parameters that were used during our cell filtering QC steps. We can visualize these overlaid onto our UMAP and as violin plots.
+
+Doublet probability scores:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(pbmc, features = c("Scrublet"), pt.size = 0.5, min.cutoff = .05, max.cutoff = 0.25) # view doublet probabilities
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(pbmc, features = c("Scrublet"), pt.size = 0.5)
+```
+
+Percent mitochondrial reads:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(pbmc, features = c("prcntMito"), pt.size = 0.5, min.cutoff = .025, max.cutoff = 0.1) # view % mitochondrial reads
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(pbmc, features = c("prcntMito"), pt.size = 0.5)
+```
+
+Total UMIs per cell:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(pbmc, features = c("UmiSums"), pt.size = 0.5, min.cutoff = 5000, max.cutoff = 20000) # view total UMIs
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(pbmc, features = c("UmiSums"), pt.size = 0.5)
+```
+
+Total transcripts per cell:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(pbmc, features = c("nCount_RNA"), pt.size = 0.5, min.cutoff = 5000, max.cutoff = 30000) # view total RNA counts
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(pbmc, features = c("nCount_RNA"), pt.size = 0.5)
+```
+
+Total genes detected per cell:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(pbmc, features = c("GenesDetected"), pt.size = 0.5, min.cutoff = 500, max.cutoff = 3000) # view total genes detected
+```
+
+```{r, warning = FALSE, error = FALSE, fig.height = 6, fig.width = 15}
+VlnPlot(pbmc, features = c("GenesDetected"), pt.size = 0.5)
+```
+
+### Assess canonical gene expression
+
+Let's see if we can broadly identify our cells by assessing expression patterns for some canonical genes we know from previous literature.
+
+Start by overlaying expression profiles onto our UMAP plot:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 20, fig.width = 15}
+FeaturePlot(pbmc,
+            features = c('CD19', 'CD79B', 'MS4A1', 'JCHAIN', # B/plasma cell genes
+                         'CD3E', 'CD3G', 'CD52', 'ZAP70', # T/ILC genes
+                         'ENSSSCG00000028461', 'CD68', 'CSF2RB', 'ICAM1',  # myeloid lineage leukocyte genes
+                         'PTPRC', # pan-immune cell gene
+                         'AHSP', 'HBM'), # RBC genes
+            cols = c("grey90", "purple4")) & NoLegend() & NoAxes()
+```
+
+To determine how genes are expressed within our Seurat clusters, let's create a dot plot to summarize how many cells express a gene in each cluster and at what relative level:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 12}
+DotPlot(pbmc, 
+        features = c('CD19', 'CD79B', 'MS4A1', 'JCHAIN', # B/plasma cell genes
+                         'CD3E', 'CD3G', 'CD52', 'ZAP70', # T/ILC genes
+                         'ENSSSCG00000028461', 'CD68', 'CSF2RB', 'ICAM1',  # myeloid lineage leukocyte genes
+                         'PTPRC', # pan-immune cell gene
+                         'AHSP', 'HBM'), # RBC genes
+        cols = c("gold", "red"), 
+        col.min = -1, 
+        col.max = 2,
+        dot.scale = 6,
+        assay = "RNA",
+        group.by = "seurat_clusters") +
+  RotatedAxis()
+```
+
+
+### Assess cluster/cell distributions
+
+Based on the clusters we've identified, let's next find out how these are distributed across our dataset. 
+
+First, let's determine some basic information about our clusters, such as how many cells are in each cluster:
+
+```{r, warning = FALSE, error = FALSE}
+cluster_no <- table(pbmc$seurat_clusters) # how many cells are in each cluster?
+cluster_no
+sum(cluster_no) # how many cells are there total?
+min(cluster_no) # how many cells are in our smallest cluster?
+```
+
+Let's go on to plot these cluster sizes, taking into account also which sample cells were derived from:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+clusterSample_no <- table(pbmc$SampleID, pbmc$seurat_clusters)
+barplot(clusterSample_no,
+        col = c("red", "dodgerblue3"),,
+        xlab = "Cluster #", 
+        ylab = "Number of cells", 
+        las = 2,
+        legend = rownames(clusterSample_no),
+        border = NA,
+        space = 0.05)
+```
+
+Instead of looking at the size of clusters, let's look at the proportions of cells coming from different samples within each cluster. 
+
+Look at the proportion of cells coming from each individual sample (IPP1, IPP2, NoPP1, NoPP2, X2I1, X2I2) within each cluster:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 14}
+Idents(pbmc) <- pbmc$seurat_clusters
+GutSampleTotalCells <- prop.table(table(pbmc$SampleID)) # What percent of total cells are from each sample?
+GutSamplePercents <- prop.table(table(Idents(pbmc),pbmc$SampleID), 
+                                margin = 1) # What percent of cells from each cluster belong to each sample?
+GutSamplePercents <- rbind(GutSamplePercents, GutSampleTotalCells) # add row of overall percentages to table
+#rowSums(GutSamplePercents) # make sure all are equal to 1
+GutSamplePercents <- t(GutSamplePercents) # transpose the table
+par(mfrow=c(1, 1), mar=c(5, 5, 4, 8))
+barplot(GutSamplePercents, # create stacked bar plot
+        col = c("red", "dodgerblue3"), 
+        legend = rownames(GutSamplePercents),
+        xlab = "Cluster #", 
+        ylab = "Frequency within cluster", 
+        las = 2,
+        border = NA,
+        space = 0.05,
+        legend.text = TRUE, 
+        args.legend = list(x = "topright", bty = "n", inset=c(-0.15, 0)))
+```
+
+We can also view the previous metrics overlaid onto our UMAP plot.
+
+Sample IDs:
+
+```{r, warning = FALSE, error = FALSE, fig2, fig.height = 3, fig.width = 6}
+Idents(pbmc) <- pbmc$seurat_clusters
+DimPlot(pbmc, # make UMAP showing sample origins
+        reduction = "umap", 
+        pt.size = 0.1, 
+        group = "SampleID")
+```
+
+```{r, warning = FALSE, error = FALSE, fig.width = 28}
+DimPlot(pbmc, # make UMAP showing sample origins
+        reduction = "umap", 
+        pt.size = 0.1, 
+        split.by = "SampleID")
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(pbmc, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Seurat/PBMC.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

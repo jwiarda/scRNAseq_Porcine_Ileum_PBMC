@@ -1,0 +1,565 @@
+---
+title: "Characterization of Ileal Non-leukocytes: Multidimensional DGE Analysis"
+author: "Jayne Wiarda"
+date: "15Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created a data subset consisting of only non-leukocytes. Up until this point, we've identified differentially expressed (DE) genes by comparing between clusters; however, these cluster assignments can be somewhat subjective. Let's now identify DE genes by comparing similarity of our cells across a multidimensional space, specified by our 'significant' PCs we identified earlier.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+## Performing cluster-independent spatial DGE analysis
+
+### Load required software packages
+
+The following analyses are conducted using base R packages, the R package singleCellHaystack (Vandenbon & Diez 2020), and the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: ggplot2 (Wickham 2016), dplyr (Wickham et al. 2020), cowplot (Wilke 2020), writexl (Ooms 2020)
+
+```{r, message = FALSE}
+library(singleCellHaystack)
+library(Seurat)  
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(writexl)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilNon <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_NonImmuneOnly.rds") 
+DefaultAssay(ilNon) <- "RNA"
+```
+
+Specify the 'significant' PCs we found for this dataset earlier:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:10
+```
+
+### Organize data
+
+Create counts matrix of the log-normalized data from the 'RNA' slot:
+
+```{r, warning = FALSE, error = FALSE}
+dat.expression <- as.matrix(ilNon[['RNA']]@data) # use log-normalized data to create count matrix
+```
+
+Create a data frame of our PCs to use as our multidimensional space:
+
+```{r, warning = FALSE, error = FALSE}
+dat.pca <- as.matrix(Embeddings(object = ilNon[["pca"]]))
+dat.pca <- dat.pca[,PCdims] # only take significant PCs we've been using for previous analyses
+```
+
+Also create a data frame of our t-SNE coordinates that will come in handy later:
+
+```{r, warning = FALSE, error = FALSE}
+dat.tsne <- as.data.frame(Embeddings(object = ilNon[["tsne"]])) # extract t-SNE coordinates
+#dat.umap <- as.data.frame(Embeddings(object = ilNon[["umap"]])) # to extract UMAP coordinates instead
+```
+
+### Calculate relative gene expression levels
+
+Calculate the median expression level of each gene in the dataset & further find which cells express genes below vs above median levels:
+
+```{r, warning = FALSE, error = FALSE}
+median.per.gene <- apply(dat.expression,1,median) # find median value for all genes
+dat.detection <- dat.expression > median.per.gene # find which genes were above the median level in which cells
+dat.detection[1:5,1:5] # preview; TRUE = gene expression above median level in a cell
+```
+
+Also calculate and plot total counts per cell, which we will take into account for our DGE analyses:
+
+```{r, warning = FALSE, error = FALSE}
+general.detection = apply(dat.detection, 2, sum) # calculate total counts per cell
+ggplot(dat.tsne, aes(x = tSNE_1, y = tSNE_2, colour = general.detection)) + # visualize total counts per cell
+  labs(x = "t-SNE1", y = "t-SNE2") + 
+  geom_point(size=2) + 
+  scale_color_gradient(low="dodgerblue", high="maroon2") + 
+  labs(color = "Det. genes")
+```
+
+### Perform cluster-independent DGE 
+
+Perform 'spatial' DGE in our multidimensional space specified by our PCs.
+
+Set seed for reproducability:
+
+```{r, warning = FALSE, error = FALSE}
+set.seed(123) 
+```
+
+Run DGE analysis:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+res.adv <- haystack_highD(x = dat.pca[,PCdims], # calculate spatial DE from the significant PCs we calculated
+                    detection = dat.detection, 
+                    use.advanced.sampling = general.detection) # use advanced mode
+```
+
+Also add in p-values that haven't been log-adjusted:
+
+```{r, warning = FALSE, error = FALSE}
+res.adv[['results']]$p.val.adj <- 10^(res.adv[['results']]$log.p.adj)
+```
+
+### Explore our top DE genes
+
+Let's take a look at our top 5 spatially DE genes:
+
+```{r, warning = FALSE, error = FALSE}
+show_result_haystack(res.haystack = res.adv, 
+                     n = 5) 
+```
+
+This is how we would plot the top 10 DE genes:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(ilNon, # plot expression of the top 10 DE genes on t-SNE
+            features = rownames(top_n(res.adv$results, -10, log.p.adj)), 
+            reduction = 'tsne',
+            cols = c("grey90", "purple4")) & NoAxes() & NoLegend()
+```
+
+### Save our DE gene data:
+
+```{r, warning = FALSE, error = FALSE}
+res.adv$results$gene <- rownames(res.adv$results)
+features <- read.table("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/QC/GeneInfo.txt", 
+                       header = TRUE) # read in the gene information for the filNonered gene list from QC analysis
+features <- features[c("Symbol", "EnsemblID", "Name")] # subset only the columns of gene symbols, Ensembl IDs, and the names used for analysis
+res.adv$results <- merge(res.adv$results, # merge the DE gene lists with the additional gene information
+               features, 
+               by.x = 'gene', 
+               by.y = "Name")
+res.adv$results <- res.adv$results[order(res.adv$results$p.val.adj),] # reorder by lowest to highest p-value within each cluster
+write_xlsx(res.adv$results, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/DE/NonImmune_SpatialDGE.xlsx')
+```
+
+### Create hierarchy of top DE genes
+
+We now want to take the top 20% of DE genes and create a hierarchical tree of these genes. This will allow us to create modules of genes with similar expression patterns.
+
+How many genes with adjusted p value below 0.05?
+
+```{r, warning = FALSE, error = FALSE}
+nDE <- sum(res.adv[['results']]$p.val.adj < 0.05)
+nDE
+```
+
+Find number of genes that encompass the lowest p-values (< 0.0000000001), indicating the most highly probable DE genes in our data: 
+
+```{r, warning = FALSE, error = FALSE}
+ngenes <- sum(res.adv[['results']]$p.val.adj < 1e-10)
+ngenes
+```
+
+Subset only most highly probable DE genes:
+
+```{r, warning = FALSE, error = FALSE}
+res.top <- show_result_haystack(res.haystack = res.adv, 
+                                n = ngenes) 
+genes.top <- res.top$gene
+```
+
+Cluster top DE genes by expression patterns:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+res.hc <- hclust_haystack_highD(x = dat.pca[,PCdims], 
+                          genes = genes.top, 
+                          detection = dat.detection,
+                          grid.coordinates = res.adv$grid.coordinates) 
+plot(res.hc, 
+     labels = FALSE, 
+     #axes = FALSE, 
+     ann = FALSE) # look at gene dendrogram 
+```
+
+### Create gene modules
+
+Based on the gene dendrogram, we need to select a number of gene modules to use (K value). We are going to test a few different K values out, ranging from 3 to 10, and then compare results to see what suits our needs best.
+
+For each k value, we will cut the tree into gene modules, then calculate gene module detection scores for each cell. We will visualize these gene detection scores on our t-SNE projection, and we will also create a violin plot summarizing the detection scores for different modules across previous cell cluster classifications. Gene module assignments and gene module detection scores will also be outputted.
+
+Run analysis with K = 3:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 24, fig.height = 6}
+noK <- 3 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k3_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k3_DetectionScores.xlsx')
+```
+
+Run analysis with K = 4:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 8}
+noK <- 4 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k4_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k4_DetectionScores.xlsx')
+```
+
+Run analysis with K = 5:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 16}
+noK <- 5 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k5_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k5_DetectionScores.xlsx')
+```
+
+Run analysis with K = 6:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 16}
+noK <- 6 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k6_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k6_DetectionScores.xlsx')
+```
+
+Run analysis with K = 7:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 16}
+noK <- 7 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k7_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k7_DetectionScores.xlsx')
+```
+
+Run analysis with K = 8:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 16}
+noK <- 8 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k8_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k8_DetectionScores.xlsx')
+```
+
+Run analysis with K = 9:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 24}
+noK <- 9 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k9_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k9_DetectionScores.xlsx')
+```
+
+Run analysis with K = 10:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 32, fig.height = 24}
+noK <- 10 # specify number of gene modules to make
+res.hc.clusters <- cutree(res.hc, k=noK) 
+table(res.hc.clusters) # summarize how many genes are in each cluster
+noK <- unique(res.hc.clusters)
+pl <- lapply(1:length(noK), function(cluster) {
+  gene.set <- names(res.hc.clusters)[res.hc.clusters==cluster]
+  plot.title <- paste0("GeneModule ", cluster)
+  p <- plot_gene_set_haystack(x = dat.tsne, genes = gene.set, detection = dat.detection)
+  p + ggtitle(plot.title) + theme(legend.title = element_text(size = 8))
+})
+plot_grid(plotlist = pl, ncol = 4) # plot results
+res.hc.clusters <- as.data.frame(res.hc.clusters)
+res.hc.clusters$gene <- rownames(res.hc.clusters)
+write_xlsx(res.hc.clusters, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k10_GeneModules.xlsx')
+det <- list()
+for (i in noK){
+  det[i] <- as.data.frame(pl[[i]][["plot_env"]][["mean.detection"]])
+  }
+df <- t(data.frame(matrix(unlist(det), nrow=length(det), byrow=TRUE)))  
+colnames(df) <- paste0('GeneModule', noK)
+df <- as.data.frame(df)
+rownames(df) <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+df <- df[match(colnames(ilNon), rownames(df)),]
+ilNon <- AddMetaData(ilNon, df)
+Idents(ilNon) <- ilNon$phyloorder
+genmods <- colnames(ilNon@meta.data %>% select(starts_with("GeneModule")))
+VlnPlot(ilNon, 
+        features = c(genmods), 
+        pt.size = 0.8,
+        ncol = 4)
+FeaturePlot(ilNon, # I don't like the pl plot, so replotted with FeaturePlot in Seurat package
+            features = c(genmods),
+            cols = c('grey90', 'chocolate'),
+            ncol = 4,
+            reduction = 'tsne',
+            pt.size = 2) & NoAxes()
+df$CellBarcodes <- rownames(as.data.frame(pl[[1]][["plot_env"]][["mean.detection"]]))
+write_xlsx(df, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Haystack/NonImmune_k10_DetectionScores.xlsx')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Alexis Vandenbon and Diego Diez (2020): A clustering-independent method for finding differentially expressed genes in single-cell transcriptome data. Nature Communications
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr
+
+Claus O. Wilke (2020). cowplot: Streamlined Plot Theme and Plot Annotations for 'ggplot2'. R package version 1.1.0. https://CRAN.R-project.org/package=cowplot
+  

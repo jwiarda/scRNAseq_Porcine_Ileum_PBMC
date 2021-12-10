@@ -1,0 +1,114 @@
+---
+title: "Characterization of Ileal Cells: Hierarchical Clustering"
+author: "Jayne Wiarda"
+date: "01June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created our final annotations for our data and need to re-do hierarchical clustering with these final annotations.
+
+## Hierarchical clustering of cell clusters
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(il) <- il$cellID # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:19
+```
+
+### Calculate hierarchical clustering
+
+Build a phylogenetic tree, utilizing seurat_clusters as our groups and using the pre-determined significant number of PCs to specify the dimensionality of our data to use:
+
+```{r, warning = FALSE, error = FALSE}
+il <- BuildClusterTree(il, 
+                       dims = PCdims, 
+                       assay = "PCA")
+```
+
+Now let's look at our cluster tree:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+PlotClusterTree(il, 
+                edge.width = 3) # plot tree with node labels
+```
+
+Let's remove node labels and plot the tree again:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- Tool(object = il, 
+                  slot = "BuildClusterTree") 
+ape::plot.phylo(x = data.tree, 
+                direction = "downwards", # plot the tree without node labels
+                edge.width = 1.5)
+```
+
+Let's reorder some of the branches while still maintaining our heirarchy:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- ape::rotateConstr(data.tree, c('Epithelial cells', 'Stromal cells', 'Dendritic cells', 'Macrophages',
+                                            'Mast cells', 'Group 3 ILCs', 'Antibody-secreting cells', 'Transitioning B cells',
+                                            'Resting B cells', 'Cycling B cells', 'Activated B cells',
+                                            'Follicular CD4 ab T cells', 'Cycling CD4 ab T cells', 'Activated CD4 ab T cells', 
+                                            'Naive CD4/CD8 ab T cells', 'CD2neg GD T cells', 'Cycling CD8 ab T cells', 
+                                            'Cytotoxic CD8 ab T cells', 'Activated CD8 ab T cells', 'Activated gd T cells',
+                                            'Cytotoxic gd T cells', 'Cycling gd T cells', 'SELLhi gd T cells', 'Cytotoxic group 1 ILCs',
+                                            'Activated group 1 ILCs', 'Cycling group 1 ILCs'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+For future analyses, we may want to order our clusters by this phylogenetic order, so let's store that information in a metadata slot for our Seurat object, called 'phyloorder':
+
+```{r, warning = FALSE, error = FALSE}
+levels(il) <- rev(c('Epithelial cells', 'Stromal cells', 'Dendritic cells', 'Macrophages',
+                                            'Mast cells', 'Group 3 ILCs', 'Antibody-secreting cells', 'Transitioning B cells',
+                                            'Resting B cells', 'Cycling B cells', 'Activated B cells',
+                                            'Follicular CD4 ab T cells', 'Cycling CD4 ab T cells', 'Activated CD4 ab T cells', 
+                                            'Naive CD4/CD8 ab T cells', 'CD2neg GD T cells', 'Cycling CD8 ab T cells', 
+                                            'Cytotoxic CD8 ab T cells', 'Activated CD8 ab T cells', 'Activated gd T cells',
+                                            'Cytotoxic gd T cells', 'Cycling gd T cells', 'SELLhi gd T cells', 'Cytotoxic group 1 ILCs',
+                                            'Activated group 1 ILCs', 'Cycling group 1 ILCs'))
+il$phylo <- Idents(il)
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(il, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

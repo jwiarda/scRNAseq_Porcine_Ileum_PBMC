@@ -1,0 +1,108 @@
+---
+title: "Characterization of Ileal Myeloid Lineage Leukocytes: Hierarchical Clustering"
+author: "Jayne Wiarda"
+date: "10Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created a data subset consisting of only myeloid lineage leukocytes. Let's now perform hierarchical clustering analysis on just these clusters of cells.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+## Hierarchical clustering of cell clusters
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)         
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilM <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_MyeloidOnly.rds") 
+DefaultAssay(ilM) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(ilM) <- ilM$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Also bring in the number of 'significant' PCs that we calculated for this dataset previously:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:9
+```
+
+### Calculate hierarchical clustering
+
+Build a phylogenetic tree, utilizing seurat_clusters as our groups and using the pre-determined significant number of PCs to specify the dimensionality of our data to use:
+
+```{r, warning = FALSE, error = FALSE}
+ilM <- BuildClusterTree(ilM, 
+                       dims = PCdims, 
+                       assay = "PCA")
+```
+
+Now let's look at our cluster tree:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+PlotClusterTree(ilM, 
+                edge.width = 3) # plot tree with node labels
+```
+
+Let's remove node labels and plot the tree again:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- Tool(object = ilM, 
+                  slot = "BuildClusterTree") 
+ape::plot.phylo(x = data.tree, 
+                direction = "downwards", # plot the tree without node labels
+                edge.width = 1.5)
+```
+
+Let's reorder some of the branches while still maintaining our heirarchy:
+
+```{r, warning = FALSE, error = FALSE, fig.width = 20}
+data.tree <- ape::rotateConstr(data.tree, c('52', '49', '42'))
+plot(data.tree, direction = 'downwards', edge.width = 1.5, font = 1)
+```
+
+For future analyses, we may want to order our clusters by this phylogenetic order, so let's store that information in a metadata slot for our Seurat object, called 'phyloorder':
+
+```{r, warning = FALSE, error = FALSE}
+levels(ilM) <- rev(c('52', '49', '42')) 
+ilM$phyloorder <- Idents(ilM)
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = TRUE}
+saveRDS(ilM, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_MyeloidOnly.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).

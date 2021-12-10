@@ -1,0 +1,263 @@
+---
+title: "Characterization of Ileal T Cells & Innate Lymphoid Cells: Overall Interpretations & Cell Calling"
+author: "Jayne Wiarda"
+date: "1Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created a data subset consisting of only T/ILC lineage lymphocytes and performed further analyses to characterize the data. Let's now visualize the data a few other ways and finally decide on more highly-resolved cell identities.
+
+Sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+In this analysis, we end up classifying our T/ILC lineage lymphocytes into groupings as follows:
+
+* CD4 ab T cells = clusters 12, 15, 26, 41, 46
+* Mixed CD4 & CD8 ab T cells (naive) = cluster 24
+* CD8 ab T cells = clusters 3, 7, 14, 17, 37
+* Mixed gd & CD8 ab T cells = clusters 19, 34, 35, 47
+* gd T cells = clusters 6, 23, 29, 31, 32, 51
+* ILCs = clusters 1, 18, 43, 44, 53
+
+## Overall Interpretations & Cell Calling
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019) & tidyr (Wickham 2020) & fmsb (Nakazawa 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat) 
+library(fmsb)
+library(tidyr)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilT <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds") 
+DefaultAssay(ilT) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(ilT) <- ilT$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+### Look at some canonical genes
+
+Plot some canonical T cell genes (CD4, CD8B, TRDC, CD3E, CD2, CD8A) and some genes expected to be expressed by all immune cells (PTPRC), B cells (CD79A), and myeloid lineage leukocytes (ENSSSCG00000028461 aka SIRPA).
+
+Plot some genes overlaid onto the t-SNE:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(ilT,
+            features = c('CD4', 'CD8B', 'TRDC', 'CD3E', 'CD2', 'CD8A'),
+            reduction = 'tsne',
+            cols = c("grey90", "purple4"),
+            ncol = 3) & NoLegend() & NoAxes()
+```
+
+Plot some genes summarized at cluster level in dot plot:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 10}
+p <- DotPlot(ilT, 
+             features = c('CD4', 'CD8B', 'TRDC'), 
+             assay = "RNA") +
+  RotatedAxis()
+p
+```
+
+Look at the data behind the dot plot:
+
+```{r, warning = FALSE, error = FALSE}
+p$data
+```
+
+Plot these data in radial plots, where we can see the percent of cells in a cluster that express each of CD4, CD8B, and TRDC:
+
+```{r, warning = FALSE, error = FALSE}
+dat <- spread(p$data, features.plot, pct.exp)
+CD4 <- dat[, c('id', 'CD4')]
+CD4 <- na.omit(CD4)
+CD8B <- dat[, c('id', 'CD8B')]
+CD8B <- na.omit(CD8B)
+TRDC <- dat[, c('id', 'TRDC')]
+TRDC <- na.omit(TRDC)
+counts <- merge(merge(CD4, CD8B, by = 'id'), TRDC, by = 'id')
+rownames(counts) <- counts$id
+counts$id <- NULL
+counts <- counts[order(match(rownames(counts), levels(ilT$neworder))), , drop = FALSE]
+min <- rep(0, 3)
+max <- rep(100, 3)
+#max <- apply(counts,2,max)
+mm <- data.frame(max, min)
+mm$thresholds <- rep(10, 3)
+mm <- t(mm)
+colnames(mm) <- colnames(counts)
+data <- rbind(mm, counts)
+par(mar = rep(0.8,4))
+par(mfcol = c(3,7))
+p <- for(i in 1:5) {
+  radarchart(data[c(1:3, i+3),],
+             pfcol = c("grey60",NA),
+             pcol= c(NA,'violetred'), 
+             plty = 1, 
+             plwd = 2,
+             title = row.names(data)[i+3], 
+             cglcol="grey40", 
+             cglty=2, 
+             axislabcol="grey", 
+             cglwd=1,
+             pty = 32
+  )
+}
+p <- for(i in 6) {
+  radarchart(data[c(1:3, i+3),],
+             pfcol = c("grey60",NA),
+             pcol= c(NA,'darkorange'), 
+             plty = 1, 
+             plwd = 2,
+             title = row.names(data)[i+3], 
+             cglcol="grey40", 
+             cglty=2, 
+             axislabcol="grey", 
+             cglwd=1,
+             pty = 32
+  )
+}
+p <- for(i in 7:11) {
+  radarchart(data[c(1:3, i+3),],
+             pfcol = c("grey60",NA),
+             pcol= c(NA,'goldenrod1'), 
+             plty = 1, 
+             plwd = 2,
+             title = row.names(data)[i+3], 
+             cglcol="grey40", 
+             cglty=2, 
+             axislabcol="grey", 
+             cglwd=1,
+             pty = 32
+  )
+}
+p <- for(i in 12:15) {
+  radarchart(data[c(1:3, i+3),],
+             pfcol = c("grey60",NA),
+             pcol= c(NA,'limegreen'), 
+             plty = 1, 
+             plwd = 2,
+             title = row.names(data)[i+3], 
+             cglcol="grey40", 
+             cglty=2, 
+             axislabcol="grey", 
+             cglwd=1,
+             pty = 32
+  )
+}
+p <- for(i in 16:21) {
+  radarchart(data[c(1:3, i+3),],
+             pfcol = c("grey60",NA),
+             pcol= c(NA,'dodgerblue3'), 
+             plty = 1, 
+             plwd = 2,
+             title = row.names(data)[i+3], 
+             cglcol="grey40", 
+             cglty=2, 
+             axislabcol="grey", 
+             cglwd=1,
+             pty = 32
+  )
+}
+```
+
+From these plots, we can see that we can classify clusters as follows:
+
+* CD4 ab T cells (CD3E+CD4+CD8B-TRDC-) = clusters 12, 15, 26, 41, 46 (>10% of cells express CD4; <10% of cells express CD8B or TRDC)
+* Mixed CD4 & CD8 ab T cells (CD3E+CD4+CD8B+TRDC-) = cluster 24 (>10% of cells express CD4 or CD8B; <10% of cells express TRDC)... furthermore from earlier DGE testing, we see this cluster stands out because of high expression of genes such as CCR7, SELL, LEF1, indicating these to be naive cells
+* CD8 ab T cells (CD3E+CD4-CD8B+TRDC-) = clusters 3, 7, 14, 17, 37 (>10% of cells express CD8B; <10% of cells express CD4 or TRDC)
+* Mixed gd & CD8 ab T cells (CD3E+CD4-CD8B+TRDC+) = clusters 19, 34, 35, 47 (>10% of cells express CD8B or TRDC; <10% of cells express CD4)
+* gd T cells (CD3E+CD4-CD8B-TRDC+) = clusters 6, 23, 29, 31, 32, 51 (>10% of cells express TRDC; <10% of cells express CD8B or CD4)
+* ILCs (CD3E-CD4-CD8B-TRDC-CD2+)= clusters 1, 18, 43, 44, 53 (less than 50% of cells express CD3E)
+
+### Assign cellular identities
+
+Assign T cell identities under 'TILCtypes' data slot:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(ilT) <- ilT$seurat_clusters
+levels(ilT) <- c('12', '15', '26', '41', '46', 
+                 '24', 
+                 '3', '7', '14', '17', '37',
+                 '19', '34', '35', '47',
+                 '6', '23', '29', '31', '32', '51',
+                 '1', '18', '43', '44', '53') # Reorder the clusters based on putative cell type IDs we came up with from looking at the data
+ilT$neworder <- Idents(ilT)
+Idents(ilT) <- ilT$neworder
+TILCtypes <- c(rep('CD4 ab T cell', 5), 'CD4/CD8 mix', rep('CD8 ab T cell', 5),
+  rep('CD8/gd mix', 4), rep('gd T cell', 6), 
+  rep('ILC', 5)) # Rename clusters based on phenotype IDs
+ilT$TILCtypes <- ilT$neworder
+Idents(ilT) <- ilT$TILCtypes
+names(TILCtypes) <- levels(ilT) # assign TILCtypes to cluster numbers
+ilT <- RenameIdents(ilT, TILCtypes) # change dataset identity to cell types in new Seurat object
+ilT$TILCtypes <- Idents(ilT)
+```
+
+### Make more plots
+
+Replot some data on dot plot with new cluster order:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 10}
+Idents(ilT) <- ilT$TILCtypes
+DotPlot(ilT, 
+        features = c('CD4', 'CD8B', 'TRDC', 'CD3E', 'CD2', 'CD8A', 'PTPRC', 'CD79A', 'ENSSSCG00000028461'), 
+        cols = c("gold", "red"), 
+        col.min = -1, 
+        col.max = 2,
+        dot.scale = 6,
+        assay = "RNA",
+        group.by = 'neworder') +
+  RotatedAxis()
+```
+
+View TILCtypes classifications on t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT,
+        reduction = 'tsne',
+        group.by = 'TILCtypes', 
+        cols = c('violetred', 'darkorange', 'gold', 'limegreen', 'dodgerblue3', 'purple4'))
+```
+
+### Save our data
+
+Since we've added some new meta data information to our dataset, let's save our Seurat object as an .rds again:
+
+```{r, warning = FALSE, error = FALSE, eval = FALSE}
+saveRDS(ilT, "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds")
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Minato Nakazawa (2019). fmsb: Functions for Medical Statistics Book with some Demographic Data. R
+  package version 0.7.0. https://CRAN.R-project.org/package=fmsb
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2.
+  https://CRAN.R-project.org/package=tidyr

@@ -1,0 +1,329 @@
+---
+title: "Differential Abundance Analysis of Ileum With and Without Peyer's Patches"
+author: "Jayne Wiarda"
+date: "15July2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Perform differential abundance (DA) analysis between samples of ileum with areas containing Peyer's patches only (PP only) or containing only areas without Peyer's patches (non-PP only).
+
+## Differential abundance (DA) analysis
+
+### Load required software packages
+
+The following analyses are conducted primarily using the R package miloR (Morgan and Dann 2021) for DA analysis from an object created with Seurat (Stuart and Butler et al. 2019). 
+
+Other required packages: writexl (Ooms 2020), tidyr (Wickham 2020), dplyr (Wickham et al. 2020), scater (McCathy et al. 2017), SingleCellExperiment (Amezquita et al. 2020), scran (Lun et al. 2016), dichromat (Lumley 2013). Look at sessionInfo() at bottom of script for pacakge/software versions.
+
+```{r, message = FALSE}
+library(dplyr)
+library(scater)
+library(SingleCellExperiment)
+library(miloR)
+library(Seurat)
+library(scran)
+library(tidyr)
+library(writexl)
+library(dichromat)
+```
+
+### Import relevant data 
+
+Read in the RDS file of Seurat object from previous work. This file contains only cells from PP only and non-PP only samples (whole ileum samples excluded):
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll_PPsubset.rds')
+DefaultAssay(il) <- "RNA"
+```
+
+### Create Milo object
+
+First convert Seurat object to SingleCellExperiment and then to a Milo object:
+
+```{r, warning = FALSE, error = FALSE}
+set.seed(100) # set a seed for reproducibility
+ilMilo <- as.SingleCellExperiment(il, assay = 'RNA')
+ilMilo <- Milo(ilMilo)
+```
+
+Also incorporate the shared nearest neighbors (SNN) graph calculated in Seurat into the Milo object. We will use this to calculate cell neighborhoods.
+
+```{r, warning = FALSE, error = FALSE}
+miloR::graph(ilMilo) <- miloR::graph(buildFromAdjacency(il@graphs$integrated_snn, k=20))
+```
+
+Since we now have a Milo object, we can free up space by deleting the Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+rm(il) # free up space
+```
+
+### Create & visualize cell neighborhoods:
+
+Start by creating cell neighborhoods. Parameters of prop, k, and d may be modified slightly depending on the dataset used. Higher proportions of cells (prop) will take longer to run, but may require up to a value of 0.2 for smaller datasets. We choose to set k and d parameters according to those used to calculate our SNN graph and 'significant' PCs in our previous Seurat analysis.
+
+```{r, warning = FALSE, error = FALSE}
+set.seed(100) # set a seed for reproducibility of neighborhood generation
+ilMilo <- makeNhoods(ilMilo,
+                     prop = 0.2, # sample 20% of cells...probably safe to lower asfar as 0.05 for datasets with >30k cells...may consider using proportions up to 0.2 if that helps optimize neighborhood size distribution peak
+                     k = 20, # set to k = 20 because for Seurat FindNeighbors() we used default k.param = 20
+                     d=14, # set to 14 since we used 14 PCs to find neighbors in Seurat
+                     refined = TRUE) # always use refined unless you use graph-based data batch correction, then consider either-or
+```
+
+Now that we have calculated our cell neighborhoods, let's look at their sizes. Ideally, peak size should fall between 50-100 cells per neighborhood but may be less for extremely small datasets:
+
+```{r, warning = FALSE, error = FALSE}
+plotNhoodSizeHist(ilMilo) # ideally have peak of distribution between 50 and 100...otherwise consider increasing k or prop...peak may be <50 for small datasets
+```
+
+Now let's move on to look at these cell neighborhoods overlaid onto t-SNE & UMAP coordinates. To be cohesive with visualization used on the entire ileum dataset (back when we did include whole ileum samples), we opt to overlay onto the old t-SNE/UMAP coordinates of the entire dataset, even though whole ileum samples are no longer present:
+
+```{r, warning = FALSE, error = FALSE}
+ilMilo <- buildNhoodGraph(ilMilo)
+plotNhoodGraph(ilMilo, layout = 'TSNE_ALLCELLS')
+plotNhoodGraph(ilMilo, layout = 'UMAP_ALLCELLS')
+```
+
+### Count cells in each neighborhood
+
+Now let's do a head count of which cells came from each of our 4 samples within each of our detected cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+ilMilo <- countCells(ilMilo, meta.data = data.frame(colData(ilMilo)), sample="SampleID")
+head(nhoodCounts(ilMilo))
+```
+
+### Create experimental design
+
+Create a model of experimental design variables:
+
+```{r, warning = FALSE, error = FALSE}
+milo_design <- data.frame(colData(ilMilo))[,c("SampleID", "tissue")]
+milo_design <- distinct(milo_design)
+rownames(milo_design) <- milo_design$SampleID
+milo_design
+````
+
+### Calculate distances between neighborhoods:
+
+Calculate the distances between cell neighborhoods. For large datasets, this step can take a while and tends to be the bottleneck of the entire workflow.
+
+```{r, warning = FALSE, error = FALSE}
+ilMilo@.k <- 20 # set to 20 since this is the k parameter we used to define our SNN graph in Seurat and to calculate our Nhoods earlier in MiloR
+ilMilo <- calcNhoodDistance(ilMilo,
+                            d=14, # use the same number of PCs as in Seurat and for earlier creation of Nhood in MiloR
+                            reduced.dim = 'PCA') # this step can take a looooong time & is the bottleneck of this workflow!
+```
+
+### Perform DA testing
+
+Perform DA testing on each neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+da_results <- testNhoods(ilMilo,
+                         design = ~ tissue,
+                         design.df = milo_design)
+head(da_results)
+```
+
+Make a histogram of p-values found across cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(da_results, aes(PValue)) + geom_histogram(bins=50)
+```
+
+Make a volcano plot of DA. Each dot is one cell neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) +
+  geom_point() +
+  geom_hline(yintercept = 1) ## Mark significance threshold (10% FDR)
+```
+
+Overlay logFC scores onto cell neighborhood central coordinates on t-SNE & UMAP plots:
+
+```{r, warning = FALSE, error = FALSE}
+plotNhoodGraphDA(ilMilo, da_results, layout="TSNE_ALLCELLS",alpha=0.1)
+plotNhoodGraphDA(ilMilo, da_results, layout="UMAP_ALLCELLS",alpha=0.1)
+```
+
+And we can also look at all cell neighborhoods on a bee swarm plot:
+
+```{r, warning = FALSE, error = FALSE}
+plotDAbeeswarm(da_results, alpha = 0.1)
+```
+
+The problem right now is that we know which cell neighborhoods are DA and can guess at which cell types (cellID) these correspond to, but we don't know for certain. Therefore, it may be helpful to annotate our cell neighborhoods according to cellID and then re-assess DA....
+
+### Annotate cell neighborhoods
+
+Annotate cell neighborhoods by finding which neighborhoods of most cells belonging to a specific cell ID. 
+
+Start by calculating the percentage of cells belonging to each cell type (cellID) within each neighborhood. We will record the cellID that has the largest percentage in each neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+da_results <- annotateNhoods(ilMilo, da_results, coldata_col = "cellID")
+head(da_results)
+```
+
+Create a histogram to look at the largest percentages for a single cell type within each cell neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(da_results, aes(cellID_fraction)) + geom_histogram(bins=50)
+```
+
+Based on this graph, we need to set a cut-off value for what percentage of cells in a neighborhood must share a single ID to be assigned as that cell type (cellID). In this case, we will set our cutoff at 0.7.
+
+Based on this, any cell neighborhood with >70% of cells belonging to a single cellID will be assigned to that cellID. Any cell neighborhood with <70% of cells belonging to a single cellID will be catergorized as 'Mixed' cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+da_results$cellID <- ifelse(da_results$cellID_fraction < 0.7, "Mixed", da_results$cellID)
+da_results$cellID <- factor(da_results$cellID,
+                            levels = rev(c('Mixed', 'Cycling CD4 ab T cells', 'Cycling CD8 ab T cells', 'Cycling gd T cells',
+                                           'Cycling group 1 ILCs', 'Cytotoxic CD8 ab T cells', 'Cytotoxic gd T cells',
+                                           'Cytotoxic group 1 ILCs', 'Activated CD8 ab T cells', 'Activated gd T cells',
+                                           'Activated group 1 ILCs', 'SELLhi gd T cells', 'CD2neg GD T cells',
+                                           'Naive CD4/CD8 ab T cells', 'Activated CD4 ab T cells', 'Follicular CD4 ab T cells',
+                                           'Group 3 ILCs', 'Antibody-secreting cells', 'Transitioning B cells',
+                                           'Resting B cells', 'Cycling B cells', 'Activated B cells',
+                                           'Dendritic cells', 'Macrophages', 'Mast cells', 'Epithelial cells',
+                                           'Stromal cells')))
+```
+
+### Plot DA across annotated cell neighborhoods:
+
+Make a bee swarm plot:
+
+```{r, warning = FALSE, error = FALSE}
+plotDAbeeswarm(da_results, group.by = "cellID", alpha = 0.1)
+```
+   
+### Further summarization of DA results:
+
+Let's furhter summarize only those neighborhoods with an annotated cell ID. Start by subsetting only non-Mixed neighborhoods, creating a column defining DA significance (FDR < 0.1), and creating a column indicating fold-change towards PP only or non-PP only enrichment:
+
+```{r, warning = FALSE, error = FALSE}
+da_sum <- subset(da_results, cellID_fraction > 0.7)
+da_sum <- da_sum %>% mutate(significant = case_when(FDR < 0.1 ~ 'Sig', FDR >= 0.1 ~ 'NonSig'))
+da_sum <- da_sum %>% mutate(FC = case_when(logFC > 0 ~ 'NoPP', logFC < 0 ~ 'IPP', logFC == 0 ~ 'Neutral'))
+da_sum$result <- paste(da_sum$FC, da_sum$significant, sep = '_')
+da_sum$result <- replace(da_sum$result, da_sum$result == 'IPP_NonSig', 'NonSig')
+da_sum$result <- replace(da_sum$result, da_sum$result == 'NoPP_NonSig', 'NonSig')
+```
+
+Now let's create a bar chart modeling this. Here's how we can make a basic stacked bar plot:
+
+```{r, warning = FALSE, error = FALSE}
+percents <- prop.table(table(da_sum$cellID,da_sum$result),
+                       margin = 1)
+percents <- percents[,c('IPP_Sig', 'NonSig', 'NoPP_Sig')]
+percents <- t(percents) # transpose the table
+barplot(percents, # create stacked bar plot
+        col = c('indianred4', 'grey60', 'darkslateblue'),
+        xlab = "Cell type",
+        ylab = "Frequency of neighborhoods",
+        las = 2,
+        border = NA,
+        space = 0.05)
+```
+
+But we can also make a fancier one that shows our logFC values for significantly DA neighborhoods as well:
+
+```{r, warning = FALSE, error = FALSE}
+max(da_sum$logFC)
+min(da_sum$logFC)
+
+data <- as.data.frame(table(da_sum$cellID,da_sum$result))
+cols <- c('indianred4', 'grey60', 'darkslateblue')
+ggplot(data, aes(fill=Var2, y=Freq, x=Var1)) + 
+    geom_bar(position="fill", stat="identity") +
+  theme_void() + 
+  scale_fill_manual(values=cols) 
+
+seq <- seq(0, 8.8, len=50)
+seqneg <- seq*(-1)
+
+NoPP <- subset(da_sum, result == 'NoPP_Sig')
+NoPP$interval <- cut(NoPP$logFC, breaks = seq)
+PP <- subset(da_sum, result == 'IPP_Sig')
+PP$interval <- cut(PP$logFC, breaks = seqneg)
+NS <- subset(da_sum, result == 'NonSig')
+NS$interval <- 'NA'
+merge <- rbind(NoPP, PP)
+merge <- rbind(merge, NS)
+
+data <- as.data.frame(table(merge$cellID,merge$interval))
+
+noPPcol <- colorRampPalette(c("white", "darkslateblue"))
+noPPcol(49)
+plot(rep(1,49),col=noPPcol(49),pch=19,cex=3)
+
+PPcol <- colorRampPalette(c("white", "indianred4"))
+PPcol(49)
+plot(rep(1,49),col=PPcol(49),pch=19,cex=3)
+
+cols <- c(noPPcol(49), PPcol(49), 'grey60')
+
+ggplot(data, aes(fill=Var2, y=Freq, x=Var1)) + 
+    geom_bar(position="fill", stat="identity") +
+  theme_void() + 
+  scale_fill_manual(values=cols) +
+    xlab("")
+  
+ggplot(data, aes(fill=Var2, y=Freq, x=Var1)) + 
+    geom_bar(position="fill", stat="identity", show.legend = FALSE) +
+  theme_void() + 
+  scale_fill_manual(values=cols) 
+```
+
+### Save DA results:
+
+```{r, warning = FALSE, error = FALSE}
+write_xlsx(da_results, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/DifferentialAbundance/IleumAtlas_PPsubset_DAresults.xlsx')
+```
+
+Save Milo object:
+
+```{r, warning = FALSE, error = FALSE}
+saveRDS(ilMilo, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/DifferentialAbundance/IleumAtlas_PPsubset_Milo.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Amezquita R, Lun A, Becht E, Carey V, Carpp L, Geistlinger L, Marini F, Rue-Albrecht K,
+Risso D, Soneson C, Waldron L, Pages H, Smith M, Huber W, Morgan M, Gottardo R, Hicks S
+(2020). “Orchestrating single-cell analysis with Bioconductor.” _Nature Methods_, *17*,
+137-145. <URL: https://www.nature.com/articles/s41592-019-0654-x>.
+
+Thomas Lumley (2013). dichromat: Color Schemes for Dichromats. R package version
+  2.0-0. https://CRAN.R-project.org/package=dichromat
+  
+Lun ATL, McCarthy DJ, Marioni JC (2016). “A step-by-step workflow for low-level
+analysis of single-cell RNA-seq data with Bioconductor.” _F1000Res._, *5*, 2122. doi:
+10.12688/f1000research.9501.2 (URL: https://doi.org/10.12688/f1000research.9501.2).
+
+McCarthy DJ, Campbell KR, Lun ATL, Willis QF (2017). “Scater: pre-processing, quality
+control, normalisation and visualisation of single-cell RNA-seq data in R.”
+_Bioinformatics_, *33*, 1179-1186. doi: 10.1093/bioinformatics/btw777 (URL:
+https://doi.org/10.1093/bioinformatics/btw777).
+
+Mike Morgan and Emma Dann (2021). miloR: Differential neighbourhood abundance testing on a graph. R package version 1.0.0. https://marionilab.github.io/miloR
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2.
+  https://CRAN.R-project.org/package=tidyr
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data
+  Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

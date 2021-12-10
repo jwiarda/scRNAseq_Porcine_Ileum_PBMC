@@ -1,0 +1,300 @@
+---
+title: "Differential Abundance Analysis of Merged ILCs from Ileum & PBMCs"
+author: "Jayne Wiarda"
+date: "15July2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Perform differential abundance (DA) analysis between cells derived from samples of ileum and PBMCs.
+
+## Differential abundance (DA) analysis
+
+### Load required software packages
+
+The following analyses are conducted primarily using the R package miloR (Morgan and Dann 2021) for DA analysis from an object created with Seurat (Stuart and Butler et al. 2019). 
+
+Other required packages: writexl (Ooms 2020), tidyr (Wickham 2020), dplyr (Wickham et al. 2020), scater (McCathy et al. 2017), SingleCellExperiment (Amezquita et al. 2020), scran (Lun et al. 2016), dichromat (Lumley 2013). Look at sessionInfo() at bottom of script for pacakge/software versions.
+
+```{r, message = FALSE}
+library(dplyr)
+library(scater)
+library(SingleCellExperiment)
+library(miloR)
+library(Seurat)
+library(scran)
+library(tidyr)
+library(writexl)
+library(dichromat)
+```
+
+### Import relevant data 
+
+Read in the RDS file of Seurat object from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ILC <- readRDS('/home/Jayne.Wiarda/scRNAseqIleumAtlas/MergedILCs/Seurat/GutBlood_IntegratedILCs.rds')
+DefaultAssay(ILC) <- "RNA"
+PCdims <- 1:4
+```
+
+### Add locational data for cells
+
+We didn't do a few things on the last script that are required for DA analysis....oopsies. 
+
+Start by describing PBMC vs ileal location of cells in meta data:
+
+```{r, warning = FALSE, error = FALSE}  
+location <- substr(colnames(ILC), 1, 5)
+unique(location)
+location <- gsub('pbmc_', 'pbmc', location)
+unique(location)
+ILC$location <- location
+```
+
+Visualize these annotations:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ILC, 
+        reduction = 'tsne',
+        group.by = 'location',
+        cols = c('darkslateblue', 'darksalmon'))
+```
+
+### Calculate nearest neighbors
+
+Also calculate shared nearest neighbors for cells, which is required for miloR to find cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+ILC <- FindNeighbors(ILC, 
+                     dims = PCdims, # use previously calculated 'significant' PCs
+                     verbose = FALSE) 
+```
+                     
+### Create Milo object
+
+First convert Seurat object to SingleCellExperiment and then to a Milo object:
+
+```{r, warning = FALSE, error = FALSE}
+set.seed(100) # set a seed for reproducibility
+ILCmilo <- as.SingleCellExperiment(ILC, assay = 'RNA')
+ILCmilo <- Milo(ILCmilo)
+```
+
+Also incorporate the shared nearest neighbors (SNN) graph calculated in Seurat into the Milo object. We will use this to calculate cell neighborhoods.
+
+```{r, warning = FALSE, error = FALSE}
+miloR::graph(ILCmilo) <- miloR::graph(buildFromAdjacency(ILC@graphs$integrated_snn, k=20))
+```
+
+### Create & visualize cell neighborhoods:
+
+Start by creating cell neighborhoods. Parameters of prop, k, and d may be modified slightly depending on the dataset used. Higher proportions of cells (prop) will take longer to run, but may require up to a value of 0.2 for smaller datasets. We choose to set k and d parameters according to those used to calculate our SNN graph and 'significant' PCs in our previous Seurat analysis.
+
+```{r, warning = FALSE, error = FALSE}
+set.seed(100) # set a seed for reproducibility of neighborhood generation
+ILCmilo <- makeNhoods(ILCmilo,
+                     prop = 0.2, # sample 20% of cells...probably safe to lower asfar as 0.05 for datasets with >30k cells...may consider using proportions up to 0.2 if that helps optimize neighborhood size distribution peak
+                     k = 20, # set to k = 20 because for Seurat FindNeighbors() we used default k.param = 20
+                     d=4, # set to 4 since we used 4 PCs to find neighbors in Seurat
+                     refined = TRUE) # always use refined unless you use graph-based data batch correction, then consider either-or
+```
+
+Now that we have calculated our cell neighborhoods, let's look at their sizes. Ideally, peak size should fall between 50-100 cells per neighborhood but may be less for extremely small datasets:
+
+```{r, warning = FALSE, error = FALSE}
+plotNhoodSizeHist(ILCmilo) # ideally have peak of distribution between 50 and 100...otherwise consider increasing k or prop...peak may be <50 for small datasets
+```
+
+Now let's move on to look at these cell neighborhoods overlaid onto t-SNE & UMAP coordinates:
+
+```{r, warning = FALSE, error = FALSE}
+ILCmilo <- buildNhoodGraph(ILCmilo)
+plotNhoodGraph(ILCmilo, layout = 'TSNE')
+plotNhoodGraph(ILCmilo, layout = 'UMAP')
+```
+
+### Count cells in each neighborhood
+
+Now let's do a head count of which cells came from each of our samples within each of our detected cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+ILCmilo <- countCells(ILCmilo, meta.data = data.frame(colData(ILCmilo)), sample="SampleID")
+head(nhoodCounts(ILCmilo))
+```
+
+### Create experimental design
+
+Create a model of experimental design variables:
+
+```{r, warning = FALSE, error = FALSE}
+milo_design <- data.frame(colData(ILCmilo))[,c("SampleID", "location")]
+milo_design <- distinct(milo_design)
+rownames(milo_design) <- milo_design$SampleID
+milo_design
+milo_design$location <- factor(milo_design$location, levels = c("pbmc", "ileum")) # change factor level so PBMCs are listed first and will be red (negative FC), while ileum will be blue (positive FC)....same colors as in t-SNE
+````
+
+### Calculate distances between neighborhoods:
+
+Calculate the distances between cell neighborhoods. For large datasets, this step can take a while and tends to be the bottleneck of the entire workflow.
+
+```{r, warning = FALSE, error = FALSE}
+ILCmilo@.k <- 20 # set to 20 since this is the k parameter we used to define our SNN graph in Seurat and to calculate our Nhoods earlier in MiloR
+ILCmilo <- calcNhoodDistance(ILCmilo,
+                            d=4, # use the same number of PCs as in Seurat and for earlier creation of Nhood in MiloR
+                            reduced.dim = 'PCA') # this step can take a looooong time & is the bottleneck of this workflow!
+```
+
+### Perform DA testing
+
+Perform DA testing on each neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+da_results <- testNhoods(ILCmilo,
+                         design = ~ location,
+                         design.df = milo_design)
+head(da_results)
+```
+
+Make a histogram of p-values found across cell neighborhoods:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(da_results, aes(PValue)) + geom_histogram(bins=50)
+```
+
+Make a volcano plot of DA. Each dot is one cell neighborhood:
+
+```{r, warning = FALSE, error = FALSE}
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) +
+  geom_point() +
+  geom_hline(yintercept = 1) ## Mark significance threshold (10% FDR)
+```
+
+Overlay logFC scores onto cell neighborhood central coordinates on t-SNE & UMAP plots:
+
+```{r, warning = FALSE, error = FALSE}
+plotNhoodGraphDA(ILCmilo, da_results, layout="TSNE",alpha=0.1)
+plotNhoodGraphDA(ILCmilo, da_results, layout="UMAP",alpha=0.1)
+```
+
+And we can also look at all cell neighborhoods on a bee swarm plot:
+
+```{r, warning = FALSE, error = FALSE}
+plotDAbeeswarm(da_results, alpha = 0.1)
+```
+   
+### Further summarization of DA results:
+
+Now let's create a pie chart showing our DA results:
+
+```{r, warning = FALSE, error = FALSE}
+DA <- as.data.frame(c(da_results['FDR'], da_results['logFC']))
+DA$Sig[DA$FDR >= 0.1] <- 'NS'
+DA$Sig[DA$FDR < 0.1 & DA$logFC > 0] <- 'ileum'
+DA$Sig[DA$FDR < 0.1 & DA$logFC < 0] <- 'pbmc'
+
+data <- as.data.frame(table(DA$Sig))
+cols <- c("darkslateblue", "grey50", "red3")
+ggplot(data, aes(x=1, y=Freq, fill=Var1))+ 
+  geom_bar(width = 1, stat = "identity") + 
+  coord_polar(theta = "y") +
+  theme_void() + 
+  scale_fill_manual(values=cols) 
+```
+
+But we can also make a fancier one that shows our logFC values for significantly DA neighborhoods as well:
+
+```{r, warning = FALSE, error = FALSE}
+max(DA$logFC)
+min(DA$logFC)
+
+seq <- seq(0, 7.35, len=50)
+seqneg <- seq*(-1)
+
+il <- subset(DA, Sig == 'ileum')
+il$interval <- cut(il$logFC, breaks = seq)
+pbmc <- subset(DA, Sig == 'pbmc')
+pbmc$interval <- cut(pbmc$logFC, breaks = seqneg)
+merge <- rbind(il, pbmc)
+data <- as.data.frame(summary(merge$interval))
+table(DA$Sig)
+NS <- as.data.frame(434)
+colnames(NS) <- colnames(data)
+rownames(NS) <- 'NS'
+data <- rbind(data, NS)
+data$interval <- rownames(data)
+names(data)[1]<-paste("Freq")
+
+ilcol <- colorRampPalette(c("white", "darkslateblue"))
+ilcol(49)
+plot(rep(1,49),col=ilcol(49),pch=19,cex=3)
+
+pbmccol <- colorRampPalette(c("white", "indianred4"))
+pbmccol(49)
+plot(rep(1,49),col=pbmccol(49),pch=19,cex=3)
+
+cols <- c(pbmccol(49), ilcol(49), 'grey60')
+
+ggplot(data, aes(x="", y=Freq, fill=interval))+
+  geom_bar(width = 1, stat = "identity", show.legend = FALSE) + 
+  coord_polar(theta = "y") +
+  theme_void() +
+  scale_fill_manual(values=cols) 
+```
+
+### Save DA results:
+
+```{r, warning = FALSE, error = FALSE}
+write_xlsx(da_results, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/MergedILCs/DifferentialAbundance/IleumAtlas_mergedILC_DAresults.xlsx')
+```
+
+Save Milo object:
+
+```{r, warning = FALSE, error = FALSE}
+saveRDS(ILCmilo, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/MergedILCs/DifferentialAbundance/IleumAtlas_mergedILC_Milo.rds')
+```
+
+Re-save Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+saveRDS(ILC, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/MergedILCs/Seurat/GutBlood_IntegratedILCs.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Amezquita R, Lun A, Becht E, Carey V, Carpp L, Geistlinger L, Marini F, Rue-Albrecht K,
+Risso D, Soneson C, Waldron L, Pages H, Smith M, Huber W, Morgan M, Gottardo R, Hicks S
+(2020). “Orchestrating single-cell analysis with Bioconductor.” _Nature Methods_, *17*,
+137-145. <URL: https://www.nature.com/articles/s41592-019-0654-x>.
+
+Thomas Lumley (2013). dichromat: Color Schemes for Dichromats. R package version
+  2.0-0. https://CRAN.R-project.org/package=dichromat
+  
+Lun ATL, McCarthy DJ, Marioni JC (2016). “A step-by-step workflow for low-level
+analysis of single-cell RNA-seq data with Bioconductor.” _F1000Res._, *5*, 2122. doi:
+10.12688/f1000research.9501.2 (URL: https://doi.org/10.12688/f1000research.9501.2).
+
+McCarthy DJ, Campbell KR, Lun ATL, Willis QF (2017). “Scater: pre-processing, quality
+control, normalisation and visualisation of single-cell RNA-seq data in R.”
+_Bioinformatics_, *33*, 1179-1186. doi: 10.1093/bioinformatics/btw777 (URL:
+https://doi.org/10.1093/bioinformatics/btw777).
+
+Mike Morgan and Emma Dann (2021). miloR: Differential neighbourhood abundance testing on a graph. R package version 1.0.0. https://marionilab.github.io/miloR
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2020). tidyr: Tidy Messy Data. R package version 1.1.2.
+  https://CRAN.R-project.org/package=tidyr
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data
+  Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

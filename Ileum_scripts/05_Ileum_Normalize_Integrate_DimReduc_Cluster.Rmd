@@ -1,0 +1,414 @@
+---
+title: "Data Normalization, Integration, Dimensionality Reduction, and Clustering"
+author: "Jayne Wiarda"
+date: "31Mar2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We now need to combine our data together into a dataset we can use to perform biological interpretation. To do so, we will first need to normalize our data within each sample, done with the SCTransform method outlined previously (Stuart and Butler et al. 2019). We can then integrate our samples together to correct for confounding technical differences between samples by identifying similar cells across datasets, termed 'anchors' (Stuart and Butler et al. 2019). Next, we perform dimensionality reduction with principle component analysis (PCA) and identify a 'significant' number of principle components (PCs) to use for downstream analyses, such as dimensionality reduction to create uniform manifold approximation and projection (UMAP) and t-distributed stachastic neighbor embedding (t-SNE) visualizations of our data. The method we use to identify 'significant' PCs is outlined previously (https://hbctraining.github.io/scRNA-seq/lessons/elbow_plot_metric.html). The last step is to perform clustering, which involves comparison of clustering at multiple resolutions to determine the scenario best fitted for our dataset and analysis. The output we create for the dataset is a Seurat object that will be used in many downstream analyses.
+
+We have six ileum samples, with sample nomenclature is as follows:
+
+* IPP = ileum with only Peyer's patch regions present
+* NoPP = ileum with only regions without Peyer's patches present
+* X2I = ileum with both regions with and without Peyer's patches present; corresponding to a whole ileum cross section
+* Pig 1 = IPP1, NoPP1, X2I1
+* Pig 2 = IPP2, NoPP2, X2I2
+
+### Load required software packages
+
+We will utilize SCTransformation, integration, dimensionality reduction, and clustering workflows implemented with the software package, Seurat (Stuart and Butler et al. 2019). To run these some of these functions more quickly, we also utilize parallelization with the software package, future (Bengtsson 2020). In addition, we utilize the software package, clustree (Zappia and Oshlack 2018) to compare different clustering resolutions and identify am optimal data granularity for future analyses. Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat) 
+library(clustree) 
+library(future)
+```
+
+## Import & split Seurat object
+
+```{r, warning = FALSE, error = FALSE}
+All <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Scrublet/IleumScrubbedSeurat.rds") # read in Seurat object from doublet removal step
+All.list <- SplitObject(All, split.by = "SampleID") # split by sample IDs
+All.list <- All.list[c("IPP1", "IPP2", "NoPP1", "NoPP2", "X2I1", "X2I2")] # specify order
+```
+
+## Allow parallelization 
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+## Perform SCTransform normalization
+
+Perform SCTransform on each sample individually:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+for (i in 1:length(All.list)) { # normalize data using SCTransform method
+  All.list[[i]] <- SCTransform(All.list[[i]], 
+                               return.only.var.genes = FALSE, 
+                               verbose = FALSE) 
+}
+```
+
+## Integrate the data
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+All.features <- SelectIntegrationFeatures(All.list, 
+                                          verbose = FALSE) # select the genes to use for integration
+All.list <- PrepSCTIntegration(All.list, 
+                               anchor.features = All.features,
+                               verbose = FALSE)
+All.anchors <- FindIntegrationAnchors(All.list, 
+                                      normalization.method = "SCT", 
+                                      anchor.features = All.features, 
+                                      dims = 1:30) # identify anchors for integration from top 30 data dimensions
+All.integrated <- IntegrateData(All.anchors, 
+                                normalization.method = "SCT", 
+                                dims = 1:30) # integrate the data
+```
+
+## Identify significant PCs 
+
+Calculate the PCs of the integrated dataset:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+All.integrated <- RunPCA(All.integrated, 
+                         npcs = 100, 
+                         verbose = FALSE) # run PCA analysis for 100 dimensions of the data
+```
+
+Visualize our PCs in an elbow plot:
+
+```{r, warning = FALSE, error = FALSE}
+ElbowPlot(All.integrated,
+          ndims = 100) 
+```
+
+Quantitiatively calculate how many PCs to use:
+
+```{r, warning = FALSE, error = FALSE}
+pct <- All.integrated[["pca"]]@stdev / sum(All.integrated[["pca"]]@stdev) * 100 # find standard deviation for each PC
+cumu <- cumsum(pct) # find cumulative percentages for PCs
+co1 <- which(cumu > 90 & pct < 5)[1] # find PC representing cumulative percent >90% and less than 5% associated with the single PC
+co1 # list PC
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1 # find last PC where change in percent variation is more than 0.1%
+co2 # list PC
+pcs <- min(co1, co2) # find the minimum PC from the 2 methods used above
+pcs # list PC
+```
+
+Plot our findings:
+
+```{r, warning = FALSE, error = FALSE}
+plot_df <- data.frame(pct = pct, # put PC values into dataframe for plotting
+                      cumu = cumu, 
+                      rank = 1:length(pct))
+ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + 
+  geom_text() + 
+  geom_vline(xintercept = 90, color = "grey") + 
+  geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+  theme_bw() # visualize PCs to use in elbow plot
+```
+
+Store information for PCs to use in future computations:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:pcs 
+PCdims
+```
+
+## Construct UMAP and t-SNE plots
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+All.integrated <- RunUMAP(All.integrated, 
+                          dims = PCdims, 
+                          reduction = "pca", 
+                          assay = "SCT") # create UMAP
+All.integrated <- RunTSNE(All.integrated, 
+                          dims = PCdims, 
+                          reduction = "pca", 
+                          assay = "SCT") # create tSNE plot 
+```
+
+## Perform clustering
+
+We try multiple clustering resolutions on our dataset, including 0.5 intervals between 0.5 and 5:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+All.integrated <- FindNeighbors(All.integrated, 
+                                dims = PCdims, 
+                                verbose = FALSE) 
+All.integrated <- FindClusters(All.integrated, 
+                               dims = PCdims, 
+                               resolution = c(.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5), 
+                               verbose = FALSE) 
+```
+
+## Compare clustering resolutions
+
+First, let's look at the general relationship of cells/clusters at different levels of resolution by visualizing in a clustering tree:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 10, fig.width = 20}
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.")
+```
+
+Next, let's track expression patterns of a few canonical genes we know are specific for certain porcine cell types, such as CD3G (T/ILCs), CD3E (T cells), CD4 (CD4 T cells), CD8B (CD8 T cells), TRDC (GD T cells), CD79B (B cells), JCHAIN (antibody-secreting cells), EPCAM (epithelial cells), CST3 (myeloid lineage leukocytes), PCLAF (cycling cells), CCL5 (effector T cells), ENSSSCG00000016903 (aka GZMA; cytotoxic cells), AICDA (activated B cells), CD5 (adaptive T cells), CCR7 (circulating cells), SELL (circulating cells)
+
+```{r, warning = FALSE, error = FALSE, fig.height = 10, fig.width = 20}
+DefaultAssay(All.integrated) <- "SCT"
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD3G", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD3E", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD4", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD8B", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "TRDC", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD79B", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "JCHAIN", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "EPCAM", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CST3", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "PCLAF", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CCL5", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "ENSSSCG00000016903", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "AICDA", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CD5", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "CCR7", 
+         node_colour_aggr = "median")
+clustree(All.integrated, 
+         prefix = "integrated_snn_res.",
+         node_colour = "SELL", 
+         node_colour_aggr = "median")
+```
+
+We can also look at expression of these genes overlaid onto our dimensionality reduction plots, such as UMAP:
+
+```{r, warning = FALSE, error = FALSE}
+DefaultAssay(All.integrated) <- "SCT"
+FeaturePlot(All.integrated,
+            features = c("CD3G", "CD3E", "CD79B", "JCHAIN", "CST3", 
+            "CD4", "CD8B", "TRDC", "EPCAM", "PCLAF", "CCL5", "AICDA",
+            "ENSSSCG00000016903", "CD5", "CCR7", "SELL"))
+```
+
+And we can see how these expression patterns line up with clusters defined at different resolutions on our UMAP:
+
+Clustering resolution = 0.5
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.0.5") 
+```
+
+Clustering resolution = 1.0
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.1") 
+```
+
+Clustering resolution = 1.5
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.1.5")
+```
+
+Clustering resolution = 2.0
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.2") 
+```
+
+Clustering resolution = 2.5
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.2.5")
+```
+
+Clustering resolution = 3.0
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.3") 
+```
+
+Clustering resolution = 3.5
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.3.5") 
+```
+
+Clustering resolution = 4.0
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.4")
+```
+
+Clustering resolution = 4.5
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.4.5") 
+```
+
+Clustering resolution = 5.0
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "integrated_snn_res.5") 
+```
+
+## Select a clustering resolution
+
+The clustering resolution we liked best was 3, and we assign this to the meta data term 'seurat_clusters'. We continue to store the other cluster assignments at other resolutions too, just in case someone wants to perform analysis at a different resolution. We chose resolution = 3 as we thought it balanced between minimizing the number of clusters recovered and maximizing segregation of cells based on previously known phenotype/functional biology (canonical gene expression patterns).
+
+```{r, warning = FALSE, error = FALSE}
+All.integrated[["seurat_clusters"]] <- All.integrated[["integrated_snn_res.3"]] 
+```
+
+## Plot our finalized data
+
+View clusters in a UMAP plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'umap',
+        group.by = "seurat_clusters") 
+```
+
+View clusters in a t-SNE plot:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(All.integrated, 
+        label = TRUE,
+        reduction = 'tsne',
+        group.by = "seurat_clusters") 
+```
+
+## Add normalized and scaled data to the RNA assay
+
+At this point, our Seurat object has three 'assays', where we store counts information. The SCT assay has counts normalized and scaled with SCTransform, the integration assay has counts data used to integrate data, and the RNA assay, which at this point, still needs to be normalized and scaled.
+
+Since it's still recommended to use RNA counts rather than SCT counts for many downstream analyses, we need to normalize and scale our raw RNA counts.
+
+Normalize the RNA data with standard log normalization:
+
+```{r, warning = FALSE, error = FALSE}
+All.integrated <- NormalizeData(All.integrated,  
+                                normalization.method = "LogNormalize", 
+                                scale.factor = 10000, 
+                                assay = "RNA")
+```
+
+Scale the RNA data: 
+
+```{r, warning = FALSE, error = FALSE}
+All.integrated <- ScaleData(All.integrated, 
+                            assay = "RNA")
+```
+
+See that we now have scaled RNA data:
+
+```{r, warning = FALSE, error = FALSE}
+dim(All.integrated[["RNA"]]@scale.data)
+```
+
+## Save the Seurat object
+
+Now, importantly, we save our Seurat object as an .rds. We will end up importing the .rds back into R for many downstream analyses.
+
+```{r, warning = FALSE, error = FALSE, eval = FALSE}
+saveRDS(All.integrated, file = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Zappia L, Oshlack A. Clustering trees: a visualization for evaluating clusterings at multiple resolutions. Gigascience. 2018;7. DOI:gigascience/giy083.
+  

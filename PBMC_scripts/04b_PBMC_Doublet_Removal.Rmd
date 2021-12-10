@@ -1,0 +1,113 @@
+---
+title: "Doublet Removal: Part 2"
+author: "Jayne Wiarda"
+date: "2Apr2021"
+output:
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We can now remove cells predicted as doublets based on analysis completed in 'Doublet Removal: Part 2' using the Python package, Scrublet (Wolock et al. 2018). We will remove any cells that had a doublet probability score > 0.25.
+
+Sample nomenclature is as follows:
+
+* PBMC1 = peripheral blood mononuclear cells collected from Pig 1
+* PBMC2 = peripheral blood mononuclear cells collected from Pig 2
+
+### Load required software packages
+
+We will output new matrices with highly probable doublets removed into the same format as Cell Ranger by utilizing the DropletUtils package (Lun et al. 2019; Griffiths et al. 2018), thus generating new barcodes.tsv.gz, features.tsv.gz, matrix.mtx.gz files for each sample. We also utilize the Seurat package (Stuart and Butler et al. 2019) for organizing our data into Seurat objects. Refer to sessionInfo() at the bottom of the page for the R and package versions used. 
+
+Other required packages: dplyr (Wickham et al. 2020)
+
+```{r, message = FALSE}
+library(dplyr) 
+library(DropletUtils) 
+library(Seurat) 
+```
+
+## Filter out highly-probable doublets
+
+### Re-filter our counts and phenotype data based on the previous pass/fail criteria:
+
+```{r, warning = FALSE, error = FALSE}
+All <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/QC/PBMC_QC.rds")
+All$counts <- All$counts[,All$phenoData$PassAll] # in counts matrix, keep only cells that passed all criteria in previous QC (not including doublet removal)
+All$phenoData <- All$phenoData[All$phenoData$PassAll,] # in phenotype data, keep only cells that passed all criteria in previous QC (not including doublet removal)
+```
+
+### Import our Scrublet scores:
+
+```{r, warning = FALSE, error = FALSE}
+scrubPBMC1 <- read.csv("/home/Jayne.Wiarda/scRNAseqGutsBlood/Scrublet/PBMC1_ScrubScoreForJayne.csv") # import doublet scores for sample PBMC1
+scrubPBMC2 <- read.csv("/home/Jayne.Wiarda/scRNAseqGutsBlood/Scrublet/PBMC2_ScrubScoreForJayne.csv") # import doublet scores for sample PBMC2
+scrub_combined <- rbind(scrubPBMC1, scrubPBMC2) # bind the dataframes together in the exact same order we've been using to list our samples (alphabetical in our case)
+```
+
+### Add doublet probability score information to the phenotype dataframe:
+
+```{r, warning = FALSE, error = FALSE}
+head(scrub_combined, n = 3) # identify column name for doublet scores
+All$phenoData$Scrublet <- scrub_combined$X0 # add column of scrublet data information for each cell to phenotype dataframe
+All$phenoData <- mutate(All$phenoData, PassScrub = Scrublet < 0.25) # set the appropriate probability threshold... we decided on 0.25 for all samples here
+```
+
+How many cells were removed as high-probability doublets?
+
+```{r, warning = FALSE, error = FALSE}
+table(All$phenoData$SampleID,All$phenoData$PassScrub) # how many cells passed scrubbing criteria?
+```
+
+### Filter out probable doublets:
+
+```{r, warning = FALSE, error = FALSE}
+All$counts <- All$counts[,All$phenoData$PassScrub] # keep only cells that passed all criteria in QC
+All$phenoData <- All$phenoData[All$phenoData$PassScrub,]
+rownames(All$phenoData) <- All$phenoData$Loupe # change row names to barcode IDs
+```
+
+### Save the data:
+
+```{r, warning = FALSE, error = FALSE, eval = FALSE}
+stopifnot(identical(as.character(rownames(All$phenoData)),colnames(All$counts)))
+stopifnot(identical(as.character(All$featureData$Name),rownames(All$counts)))
+out <- list()
+out[["counts"]] <- All$counts
+out[["phenoData"]] <- All$phenoData
+out[["featureData"]] <- All$featureData
+saveRDS(out,file=file.path("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Scrublet/", "PBMCscrubbedDFs.rds")) # this saves all of our information for counts, barcodes, and feature data as an .rds
+seurat <- CreateSeuratObject(counts = All$counts, meta.data = All$phenoData) # create Seurat object of counts & pheno data
+write10xCounts(x = seurat@assays$RNA@counts, path = "/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Scrublet/PBMCscrubbed", version = "3") # create CellRanger-like output files of our Seurat object
+saveRDS(seurat,file=file.path("/home/Jayne.Wiarda/scRNAseqIleumAtlas/PBMC/Scrublet/", "PBMCscrubbedSeurat.rds")) # this saves all of our information for counts, barcodes, and feature data as an .rds
+```
+
+In total, we have generated count matrices for each individual sample that have had ambient RNA, non-expressed genes, poor quality cells, and high probability doublets removed.
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Lun ATL, Riesenfeld S, Andrews T, Dao T, Gomes T, participants in the 1st Human Cell Atlas
+
+Jamboree, Marioni JC (2019). “EmptyDrops: distinguishing cells from empty droplets in
+droplet-based single-cell RNA sequencing data.” _Genome Biol._, *20*, 63. doi:
+10.1186/s13059-019-1662-y (URL: https://doi.org/10.1186/s13059-019-1662-y).
+
+Griffiths JA, Richard AC, Bach K, Lun ATL, Marioni JC (2018). “Detection and removal of
+barcode swapping in single-cell RNA-seq data.” _Nat. Commun._, *9*(1), 2667. doi:
+10.1038/s41467-018-05083-x (URL: https://doi.org/10.1038/s41467-018-05083-x).
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Wolock, S.L., Lopez, R., and Klein, A.M. (2019). Scrublet: Computational Identification of Cell Doublets in Single-Cell Transcriptomic Data. Cell Syst 8(4), 281-291.e289. doi: 10.1016/j.cels.2018.11.005.
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

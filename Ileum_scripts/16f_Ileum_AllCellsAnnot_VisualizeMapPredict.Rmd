@@ -1,0 +1,572 @@
+---
+title: "Visualizing mapping and prediction of ileal cells"
+author: "Jayne Wiarda"
+date: "02June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created our final annotations for our data and want to summarize results of mapping and prediction to reference scRNA-seq datasets for all cells from ileum scRNA-seq.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+Other required packages: dplyr (Wickham et al. 2020), ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020), reshape2 (Wickham 2007)
+
+```{r, message = FALSE}
+library(Seurat)  
+library(scales)
+library(ggplot2)
+library(dplyr)  
+library(reshape2)
+```
+
+### Import relevant data 
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+il <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") 
+DefaultAssay(il) <- "RNA"
+Idents(il) <- il$cellID
+```
+
+### Overlay mapping/prediction scores onto t-SNE dimensions
+
+Mapping scores:
+
+```{r, warning = FALSE, error = FALSE}
+FeaturePlot(il, 
+            features = c('SsPBMC_MappingScores', 
+                         'MmIleum_MappingScores', 
+                         'HsIleum_MappingScores'),
+            reduction = 'tsne', # change to 'tsne' to overlay onto t-SNE plot
+            ncol = 3) & 
+  scale_color_gradientn( colours = c('beige', 'yellow', 'gold', 'orange', 'red', 'red4'),  limits = c(0, 1), oob = squish) & 
+  NoAxes() & NoLegend()
+```
+
+Prediction to cell types in porcine PBMCs:
+
+```{r, warning = FALSE, error = FALSE}
+SsPredict <- colnames(il@meta.data %>% select(starts_with("SsPBMC_CellType_prediction.score."))) # extract 
+FeaturePlot(il,
+            features = c(SsPredict),
+            reduction = 'tsne', # change to 'tsne' to overlay onto t-SNE plot
+            ncol = 7) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 1), oob = squish) & 
+  NoAxes() & NoLegend() 
+SsPredict
+```
+
+Prediction to cell types in human ileum:
+
+```{r, warning = FALSE, error = FALSE}
+HsPredict <- colnames(il@meta.data %>% select(starts_with("HsIleum_CellType_prediction.score."))) # extract 
+FeaturePlot(il,
+            features = c(HsPredict),
+            reduction = 'tsne', # change to 'tsne' to overlay onto t-SNE plot
+            ncol = 10) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 1), oob = squish) & 
+  NoAxes() & NoLegend()
+HsPredict
+```
+
+Prediction to cell types in murine ileum:
+
+```{r, warning = FALSE, error = FALSE}
+HsPredict <- colnames(il@meta.data %>% select(starts_with("HsIleum_CellType_prediction.score."))) # extract 
+FeaturePlot(il,
+            features = c(HsPredict),
+            reduction = 'tsne', # change to 'tsne' to overlay onto t-SNE plot
+            ncol = 10) & 
+  scale_color_gradientn( colours = c('grey90', 'blue3'),  limits = c(0, 1), oob = squish) & 
+  NoAxes() & NoLegend()
+HsPredict
+```
+
+### Box plots of mapping/prediction scores at cell lineage level
+
+Summarize mapping/prediction findings at the level of cell lineage classifications in both query and reference datasets
+
+Plot mapping scores to reference datasets... x-axis = cell lineage classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('SsPBMC_MappingScores',
+                            'HsIleum_MappingScores',
+                            'MmIleum_MappingScores', 
+                            'celltypes')]])
+meta <- melt(meta, id = 'celltypes')
+meta$celltypes <- factor(meta$celltypes, levels=c('T/ILC lymphoid lineage leukocytes',
+                                                  'B lymphoid lineage leukocytes', 
+                                                  'Myeloid lineage leukocytes', 
+                                                  'Non-leukocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = celltypes, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to T/ILC lineage lymhocytes of reference datasets... x-axis = cell lineage classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+
+meta <- as.data.frame(il[[c('SsPBMC_CellLineage_prediction.score.T.ILC.lineage',
+                            'HsIleum_CellLineage_prediction.score.T.ILC.lineage',
+                            'MmIleum_CellLineage_prediction.score.T.ILC.lineage', 
+                            'celltypes')]])
+meta <- melt(meta, id = 'celltypes')
+meta$celltypes <- factor(meta$celltypes, levels=c('T/ILC lymphoid lineage leukocytes',
+                                                  'B lymphoid lineage leukocytes', 
+                                                  'Myeloid lineage leukocytes', 
+                                                  'Non-leukocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = celltypes, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to B lineage lymhocytes of reference datasets... x-axis = cell lineage classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('SsPBMC_CellLineage_prediction.score.B.lineage',
+                            'HsIleum_CellLineage_prediction.score.B.lineage',
+                            'MmIleum_CellLineage_prediction.score.B.lineage', 
+                            'celltypes')]])
+meta <- melt(meta, id = 'celltypes')
+meta$celltypes <- factor(meta$celltypes, levels=c('T/ILC lymphoid lineage leukocytes',
+                                                  'B lymphoid lineage leukocytes', 
+                                                  'Myeloid lineage leukocytes', 
+                                                  'Non-leukocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = celltypes, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to myeloid lineage leukocytes of reference datasets... x-axis = cell lineage classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('SsPBMC_CellLineage_prediction.score.Myeloid.lineage',
+                            'HsIleum_CellLineage_prediction.score.Myeloid.lineage',
+                            'MmIleum_CellLineage_prediction.score.Myeloid.lineage', 
+                            'celltypes')]])
+meta <- melt(meta, id = 'celltypes')
+meta$celltypes <- factor(meta$celltypes, levels=c('T/ILC lymphoid lineage leukocytes',
+                                                  'B lymphoid lineage leukocytes', 
+                                                  'Myeloid lineage leukocytes', 
+                                                  'Non-leukocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = celltypes, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to non-leukocytes of reference datasets... x-axis = cell lineage classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('SsPBMC_CellLineage_prediction.score.Non.immune',
+                            'HsIleum_CellLineage_prediction.score.Non.immune',
+                            'MmIleum_CellLineage_prediction.score.Non.immune', 
+                            'celltypes')]])
+meta <- melt(meta, id = 'celltypes')
+meta$celltypes <- factor(meta$celltypes, levels=c('T/ILC lymphoid lineage leukocytes',
+                                                  'B lymphoid lineage leukocytes', 
+                                                  'Myeloid lineage leukocytes', 
+                                                  'Non-leukocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = celltypes, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+### Box plots of mapping/prediction scores at cell lineage level
+
+Summarize mapping/prediction findings at the level of cell type classifications in both query and reference datasets
+
+Plot mapping scores to reference datasets... x-axis = cell type classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+meta <- as.data.frame(il[[c('SsPBMC_MappingScores',
+                            'HsIleum_MappingScores',
+                            'MmIleum_MappingScores', 
+                            'cellID')]])
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                                  'Follicular CD4 ab T cells',
+                                                  'Activated CD4 ab T cells',
+                                                  'Cycling CD4 ab T cells',
+                                                  'Activated CD8 ab T cells',
+                                                  'Cytotoxic CD8 ab T cells',
+                                                  'Cycling CD8 ab T cells',
+                                                  'Activated gd T cells',
+                                                  'Cytotoxic gd T cells',
+                                                  'Cycling gd T cells',
+                                                  'SELLhi gd T cells',
+                                                  'CD2neg GD T cells',
+                                                  'Activated group 1 ILCs',
+                                                  'Cytotoxic group 1 ILCs',
+                                                  'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                                  'Antibody-secreting cells', 
+                                                  'Transitioning B cells',
+                                                  'Resting B cells', 
+                                                  'Cycling B cells', 
+                                                  'Activated B cells',
+                                                  'Dendritic cells', 
+                                                  'Macrophages',
+                                                  'Mast cells',
+                                                  'Epithelial cells', 
+                                                  'Stromal cells'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = 2, 
+               position=position_dodge(0.8))+
+  scale_color_manual(values = c('grey65', 'grey40', 'black'))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=4.5, color="red", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to cell types of reference porcine PBMCs... x-axis = cell type classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+Predict <- colnames(il@meta.data %>% select(starts_with("SsPBMC_CellType_prediction.score."))) # extract 
+meta <- as.data.frame(il[[c(Predict, 
+                            'cellID')]])
+meta$SsPBMC_CellType_prediction.score.max <- NULL
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                            'Follicular CD4 ab T cells',
+                                            'Activated CD4 ab T cells',
+                                            'Cycling CD4 ab T cells',
+                                            'Activated CD8 ab T cells',
+                                            'Cytotoxic CD8 ab T cells',
+                                            'Cycling CD8 ab T cells',
+                                            'Activated gd T cells',
+                                            'Cytotoxic gd T cells',
+                                            'Cycling gd T cells',
+                                            'SELLhi gd T cells',
+                                            'CD2neg GD T cells',
+                                            'Activated group 1 ILCs',
+                                            'Cytotoxic group 1 ILCs',
+                                            'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                            'Antibody-secreting cells', 
+                                            'Transitioning B cells',
+                                            'Resting B cells', 
+                                            'Cycling B cells', 
+                                            'Activated B cells',
+                                            'Dendritic cells', 
+                                            'Macrophages',
+                                            'Mast cells',
+                                            'Epithelial cells', 
+                                            'Stromal cells'))
+meta$variable <- factor(meta$variable, levels = c('SsPBMC_CellType_prediction.score.CD4pos.ab.T.cells',
+                                                  'SsPBMC_CellType_prediction.score.CD8ABpos.ab.T.cells',
+                                                  'SsPBMC_CellType_prediction.score.CD8Apos.ab.T.NK.cells',
+                                                  'SsPBMC_CellType_prediction.score.NK.cells',
+                                                  'SsPBMC_CellType_prediction.score.CD2pos.gd.T.cells',
+                                                  'SsPBMC_CellType_prediction.score.CD2neg.gd.T.cells',
+                                                  'SsPBMC_CellType_prediction.score.B.cells',
+                                                  'SsPBMC_CellType_prediction.score.Antibody.secreting.cells',
+                                                  'SsPBMC_CellType_prediction.score.pDC',
+                                                  'SsPBMC_CellType_prediction.score.cDC',
+                                                  'SsPBMC_CellType_prediction.score.Monocytes',
+                                                  'SsPBMC_CellType_prediction.score.Erythrocytes'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = .5, 
+               position=position_dodge(0.8))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=1, color="black", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to cell types of reference human ileum... x-axis = cell type classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+Predict <- colnames(il@meta.data %>% select(starts_with("HsIleum_CellType_prediction.score."))) # extract 
+meta <- as.data.frame(il[[c(Predict, 
+                            'cellID')]])
+meta$HsIleum_CellType_prediction.score.max <- NULL
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                            'Follicular CD4 ab T cells',
+                                            'Activated CD4 ab T cells',
+                                            'Cycling CD4 ab T cells',
+                                            'Activated CD8 ab T cells',
+                                            'Cytotoxic CD8 ab T cells',
+                                            'Cycling CD8 ab T cells',
+                                            'Activated gd T cells',
+                                            'Cytotoxic gd T cells',
+                                            'Cycling gd T cells',
+                                            'SELLhi gd T cells',
+                                            'CD2neg GD T cells',
+                                            'Activated group 1 ILCs',
+                                            'Cytotoxic group 1 ILCs',
+                                            'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                            'Antibody-secreting cells', 
+                                            'Transitioning B cells',
+                                            'Resting B cells', 
+                                            'Cycling B cells', 
+                                            'Activated B cells',
+                                            'Dendritic cells', 
+                                            'Macrophages',
+                                            'Mast cells',
+                                            'Epithelial cells', 
+                                            'Stromal cells'))
+meta$variable <- factor(meta$variable, levels = c('HsIleum_CellType_prediction.score.CD4.T.cell',
+                                                  'HsIleum_CellType_prediction.score.Tfh',
+                                                  'HsIleum_CellType_prediction.score.Treg',
+                                                  'HsIleum_CellType_prediction.score.Activated.T',
+                                                  'HsIleum_CellType_prediction.score.CD8.T.cell',
+                                                  'HsIleum_CellType_prediction.score.gd.T.NK.cell',
+                                                  'HsIleum_CellType_prediction.score.B.cell',
+                                                  'HsIleum_CellType_prediction.score.Cycling.B.cell',
+                                                  'HsIleum_CellType_prediction.score.FCER2.B.cell',
+                                                  'HsIleum_CellType_prediction.score.Memory.B.cell',
+                                                  'HsIleum_CellType_prediction.score.Activated.B.cell',
+                                                  'HsIleum_CellType_prediction.score.Cycling.plasma.cell',
+                                                  'HsIleum_CellType_prediction.score.IgG.plasma.cell',
+                                                  'HsIleum_CellType_prediction.score.IgA.plasma.cell',
+                                                  'HsIleum_CellType_prediction.score.Macrophage',
+                                                  'HsIleum_CellType_prediction.score.Monocyte',
+                                                  'HsIleum_CellType_prediction.score.Cycling.myeloid.cells',
+                                                  'HsIleum_CellType_prediction.score.activated.DC',
+                                                  'HsIleum_CellType_prediction.score.cDC1',
+                                                  'HsIleum_CellType_prediction.score.cDC2',
+                                                  'HsIleum_CellType_prediction.score.pDC',
+                                                  'HsIleum_CellType_prediction.score.mast.cells',
+                                                  'HsIleum_CellType_prediction.score.early.enterocyte',
+                                                  'HsIleum_CellType_prediction.score.enterocyte',
+                                                  'HsIleum_CellType_prediction.score.BEST4.enterocyte',
+                                                  'HsIleum_CellType_prediction.score.IL2RG..enterocyte..M.cell.',
+                                                  'HsIleum_CellType_prediction.score.crypt',
+                                                  'HsIleum_CellType_prediction.score.TA',
+                                                  'HsIleum_CellType_prediction.score.Goblet.cell',
+                                                  'HsIleum_CellType_prediction.score.enteroendocrine',
+                                                  'HsIleum_CellType_prediction.score.Paneth.cell',
+                                                  'HsIleum_CellType_prediction.score.Tuft',
+                                                  'HsIleum_CellType_prediction.score.Arterial.endothelial.cell',
+                                                  'HsIleum_CellType_prediction.score.Venous.endothelial.cell',
+                                                  'HsIleum_CellType_prediction.score.Lymphatic.endothelial.cell',
+                                                  'HsIleum_CellType_prediction.score.S1.fibroblasts',
+                                                  'HsIleum_CellType_prediction.score.S2.fibroblasts',
+                                                  'HsIleum_CellType_prediction.score.S4.fibroblasts',
+                                                  'HsIleum_CellType_prediction.score.myofibroblast',
+                                                  'HsIleum_CellType_prediction.score.pericyte',
+                                                  'HsIleum_CellType_prediction.score.Glial.cell'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = .5, 
+               show.legend = FALSE,
+               position=position_dodge(0.8))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=1, color="black", aes(group=variable), position=position_dodge(.8))
+```
+
+Plot prediction scores to cell types of reference murine ileum... x-axis = cell type classification of query dataset (porcine ileum):
+
+```{r, warning = FALSE, error = FALSE}
+Predict <- colnames(il@meta.data %>% select(starts_with("MmIleum_CellType_prediction.score."))) # extract 
+meta <- as.data.frame(il[[c(Predict, 
+                            'cellID')]])
+meta$MmIleum_CellType_prediction.score.max <- NULL
+meta <- melt(meta, id = 'cellID')
+meta$cellID <- factor(meta$cellID, levels=c('Naive CD4/CD8 ab T cells',
+                                            'Follicular CD4 ab T cells',
+                                            'Activated CD4 ab T cells',
+                                            'Cycling CD4 ab T cells',
+                                            'Activated CD8 ab T cells',
+                                            'Cytotoxic CD8 ab T cells',
+                                            'Cycling CD8 ab T cells',
+                                            'Activated gd T cells',
+                                            'Cytotoxic gd T cells',
+                                            'Cycling gd T cells',
+                                            'SELLhi gd T cells',
+                                            'CD2neg GD T cells',
+                                            'Activated group 1 ILCs',
+                                            'Cytotoxic group 1 ILCs',
+                                            'Cycling group 1 ILCs', 
+                                            'Group 3 ILCs',
+                                            'Antibody-secreting cells', 
+                                            'Transitioning B cells',
+                                            'Resting B cells', 
+                                            'Cycling B cells', 
+                                            'Activated B cells',
+                                            'Dendritic cells', 
+                                            'Macrophages',
+                                            'Mast cells',
+                                            'Epithelial cells', 
+                                            'Stromal cells'))
+meta$variable <- factor(meta$variable, levels = c('MmIleum_CellType_prediction.score.T.precursor.like.cell',
+                                                  'MmIleum_CellType_prediction.score.Resting.CD4pos.T.cell',
+                                                  'MmIleum_CellType_prediction.score.Activated.CD4pos.T.cell',
+                                                  'MmIleum_CellType_prediction.score.CD8T.T.cell',
+                                                  'MmIleum_CellType_prediction.score.gd.T.cell..XCL1pos.',
+                                                  'MmIleum_CellType_prediction.score.gd.T.cel..GZMApos.',
+                                                  'MmIleum_CellType_prediction.score.NKT.cell',
+                                                  'MmIleum_CellType_prediction.score.NK.cell',
+                                                  'MmIleum_CellType_prediction.score.ILC1',
+                                                  'MmIleum_CellType_prediction.score.ILC2',
+                                                  'MmIleum_CellType_prediction.score.ILC3',
+                                                  'MmIleum_CellType_prediction.score.LTi.cell',
+                                                  'MmIleum_CellType_prediction.score.Resting.B.cell',
+                                                  'MmIleum_CellType_prediction.score.GC.B.cell..LZ.',
+                                                  'MmIleum_CellType_prediction.score.GC.B.cell..DZ.',
+                                                  'MmIleum_CellType_prediction.score.Plasma.cell',
+                                                  'MmIleum_CellType_prediction.score.Macrophage',
+                                                  'MmIleum_CellType_prediction.score.DC..CD103posCD11bpos.',
+                                                  'MmIleum_CellType_prediction.score.DC..CD103posCD11bneg.',
+                                                  'MmIleum_CellType_prediction.score.DC..CD103neg.C1.',
+                                                  'MmIleum_CellType_prediction.score.DC..CD103neg.C2.',
+                                                  'MmIleum_CellType_prediction.score.pDC',
+                                                  'MmIleum_CellType_prediction.score.Mast.cell',
+                                                  'MmIleum_CellType_prediction.score.Neutrophil',
+                                                  'MmIleum_CellType_prediction.score.Basophil',
+                                                  'MmIleum_CellType_prediction.score.Epithelial.cell.C1',
+                                                  'MmIleum_CellType_prediction.score.Epithelial.cell.C2',
+                                                  'MmIleum_CellType_prediction.score.Stromal.cell..DN.',
+                                                  'MmIleum_CellType_prediction.score.Endothelial.cell',
+                                                  'MmIleum_CellType_prediction.score.Fibroblast',
+                                                  'MmIleum_CellType_prediction.score.Lymphatic.endothelial.like.cell'))
+f <- function(x) {
+  r <- quantile(x, probs = c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+ggplot(meta, aes(x = cellID, y = value, color = variable)) +
+  theme_classic() + 
+  stat_summary(fun.data=f, 
+               aes(color= variable), 
+               geom="boxplot",
+               width = 0.5, 
+               lwd = .5, 
+               show.legend = FALSE,
+               position=position_dodge(0.8))+
+  theme(axis.text.x = element_text(angle = 90))+
+  coord_cartesian(ylim=c(0,1)) +
+  stat_summary(fun.y = mean, geom="point", size=1, color="black", aes(group=variable), position=position_dodge(.8))
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2007). Reshaping Data with the reshape Package. Journal of Statistical Software, 21(12), 1-20. URL
+  http://www.jstatsoft.org/v21/i12/.
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+ 
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr
+  

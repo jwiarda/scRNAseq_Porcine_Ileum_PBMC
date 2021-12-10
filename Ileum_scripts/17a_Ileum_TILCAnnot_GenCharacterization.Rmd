@@ -1,0 +1,356 @@
+---
+title: "Adding cell annotations to T/ILC dataset"
+author: "Jayne Wiarda"
+date: "02June2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+We have now created our final annotations for our T/ILC data and need to add these and visualize.
+
+### Load required software packages
+
+The following analyses are conducted using base R packages or the scRNA-seq analysis package, Seurat (Stuart and Butler et al. 2019), ggplot2 (Wickham 2016), scales (Wickham & Seidel 2020), dplyr (Wickham et al. 2020), readxl (Wickham & Bryan 2019), reshape2 (Wickham 2007). Refer to sessionInfo() at the bottom of the page for the R and package versions used.
+
+```{r, message = FALSE}
+library(Seurat)
+library(ggplot2)
+library(scales)
+library(dplyr)
+library(readxl)
+library(reshape2)
+```
+
+### Import relevant data
+
+Read in the RDS file from previous work:
+
+```{r, warning = FALSE, error = FALSE}
+ilT <- readRDS("/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds") 
+DefaultAssay(ilT) <- "RNA" # set our default assay to RNA for subsequent work
+Idents(ilT) <- ilT$seurat_clusters # change our default IDs to our cluster assignments
+```
+
+Read in cell annotation files:
+
+```{r, warning = FALSE, error = FALSE}
+CD4ann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/CD4T.txt')
+gdCD8ann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/gdCD8T.txt')
+ILCann <- read.table('/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Annotations/ILC.txt')
+```
+
+## Add cell annotations to the dataset
+
+```{r, warning = FALSE, error = FALSE}
+bcs <- as.data.frame(colnames(ilT))
+colnames(bcs) <- 'barcode'
+bcs$cellID <- rep('_', nrow(bcs))
+df <- as.data.frame(ilT$seurat_clusters)
+# Cluster-based cell annotations not provided in the annotation .txt files:
+naiveT <- rownames(subset(df, ilT$seurat_clusters == '24'))
+
+ActivatedCD4T <- subset(CD4ann, cellID == 'Activated CD4 ab T')
+CyclingCD4T <- subset(CD4ann, cellID == 'Cycling CD4 ab T')
+FollicularCD4T <- subset(CD4ann, cellID == 'Follicular CD4 ab T')
+CD8_activated <- subset(gdCD8ann, cellID == 'Activated CD8 ab T')
+CD8_cycling <- subset(gdCD8ann, cellID == 'Cycling CD8 ab T')
+CD8_cytotoxic <- subset(gdCD8ann, cellID == 'Cytotoxic CD8 ab T')
+gd_activated <- subset(gdCD8ann, cellID == 'Activated gd T')
+gd_CD2neg <- subset(gdCD8ann, cellID == 'CD2neg gd T')
+gd_cytotoxic <- subset(gdCD8ann, cellID == 'Cytotoxic gd T')
+gd_cycling <- subset(gdCD8ann, cellID == 'Cycling gd T')
+gd_SELLpos <- subset(gdCD8ann, cellID == 'SELLhi gd T')
+ILC1 <- subset(ILCann, cellID == 'Activated group 1 ILCs')
+ILC3 <- subset(ILCann, cellID == 'Group 3 ILCs')
+ILC1_cytotoxic <- subset(ILCann, cellID == 'Cytotoxic group 1 ILCs')
+ILC1_cycling <- subset(ILCann, cellID == 'Cycling group 1 ILCs')
+
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% naiveT, 'Naive CD4/CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ActivatedCD4T$barcode, 'Activated CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CyclingCD4T$barcode, 'Cycling CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% FollicularCD4T$barcode, 'Follicular CD4 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_activated$barcode, 'Activated CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_cycling$barcode, 'Cycling CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% CD8_cytotoxic$barcode, 'Cytotoxic CD8 ab T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_activated$barcode, 'Activated gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_CD2neg$barcode, 'CD2neg GD T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_cytotoxic$barcode, 'Cytotoxic gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_cycling$barcode, 'Cycling gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% gd_SELLpos$barcode, 'SELLhi gd T cells'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1$barcode, 'Activated group 1 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC3$barcode, 'Group 3 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1_cytotoxic$barcode, 'Cytotoxic group 1 ILCs'))
+bcs <- bcs %>% mutate(cellID = replace(cellID, barcode %in% ILC1_cycling$barcode, 'Cycling group 1 ILCs'))
+rownames(bcs) <- bcs$barcode
+bcs$barcode <- NULL
+ilT <- AddMetaData(ilT, metadata = bcs) # add new annotations to meta data slot
+```
+
+## Visualize cell annotations on t-SNE/UMAP
+
+Rearrange the data:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(ilT) <- ilT$cellID
+levels(ilT) <- c('Naive CD4/CD8 ab T cells', 'Follicular CD4 ab T cells', 'Activated CD4 ab T cells', 
+                'Cycling CD4 ab T cells', 'Activated CD8 ab T cells', 'Cytotoxic CD8 ab T cells',
+                'Cycling CD8 ab T cells', 'Activated gd T cells', 'Cytotoxic gd T cells', 
+                'Cycling gd T cells', 'SELLhi gd T cells', 'CD2neg GD T cells', 'Activated group 1 ILCs',
+                'Cytotoxic group 1 ILCs', 'Cycling group 1 ILCs', 'Group 3 ILCs')
+ilT$cellID <- Idents(ilT)
+```
+                
+Plot on t-SNE:
+
+```{r, warning = FALSE, error = FALSE}
+cols <- c('lightcoral', 'pink', 'violetred1', 'violetred4', 'yellow', 'goldenrod1', 
+          'yellow4', 'darkorange', 'darkorange3', 'chocolate4', 'tan', 'sandybrown', 
+          'red', 'indianred1', 'darkred', 'black')
+DimPlot(ilT, 
+        reduction = 'tsne',
+        group.by = 'cellID',
+        cols = cols)
+```
+
+Plot on UMAP:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        reduction = 'umap',
+        group.by = 'cellID',
+        cols = cols)
+```
+
+Plot again, one cell type at a time
+
+Naive ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = naiveT, 
+        cols.highlight = "lightcoral", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = CyclingCD4T$barcode, 
+        cols.highlight = "violetred4", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Follicular CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = FollicularCD4T$barcode, 
+        cols.highlight = "pink", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated CD4 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = ActivatedCD4T$barcode, 
+        cols.highlight = "violetred1", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated CD8 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = CD8_activated$barcode, 
+        cols.highlight = "yellow", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated gd T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = gd_activated$barcode, 
+        cols.highlight = "darkorange", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+CD2neg gd T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = gd_CD2neg$barcode, 
+        cols.highlight = "sandybrown", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling CD8 ab T cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = CD8_cycling$barcode, 
+        cols.highlight = "yellow4", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = gd_cycling$barcode, 
+        cols.highlight = "chocolate4", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic CD8 ab cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = CD8_cytotoxic$barcode, 
+        cols.highlight = "goldenrod1", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = gd_cytotoxic$barcode, 
+        cols.highlight = "darkorange3", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+SELLhi gd cells:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = gd_SELLpos$barcode, 
+        cols.highlight = "tan", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Activated group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = ILC1$barcode, 
+        cols.highlight = "red", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cytotoxic group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = ILC1_cytotoxic$barcode, 
+        cols.highlight = "indianred1", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Cycling group 1 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = ILC1_cycling$barcode, 
+        cols.highlight = "darkred", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+Group 3 ILCs:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(ilT, 
+        cells.highlight = ILC3$barcode, 
+        cols.highlight = "black", 
+        sizes.highlight = 1.5,
+        cols = "grey85", 
+        order = TRUE, 
+        reduction = 'tsne') & NoAxes() & NoLegend()
+```
+
+### Save data
+
+Lastly, let's re-save our Seurat object with the new annotations stored in the cellID meta data slot:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+Idents(ilT) <- ilT$cellID
+saveRDS(ilT, '/home/Jayne.Wiarda/scRNAseqIleumAtlas/Ileum/Seurat/Ileum_TILConly.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+  
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+Hadley Wickham (2007). Reshaping Data with the reshape Package. Journal of Statistical
+  Software, 21(12), 1-20. URL http://www.jstatsoft.org/v21/i12/.
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham and Jennifer Bryan (2019). readxl: Read Excel Files. R package version 1.3.1.
+  https://CRAN.R-project.org/package=readxl
+  
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1.
+  https://CRAN.R-project.org/package=scales
+  
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation.
+  R package version 1.0.2. https://CRAN.R-project.org/package=dplyr
