@@ -63,22 +63,22 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 12d_Ileum_ILC_PredictionMapping_Visualize.Rmd |  Visualize the results of cell mapping and label prediction for only ILCs |
 | 12e_Ileum_ILC_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only ILCs in multidimensional data space |
 | 13a_Ileum_B_Subset_DimReduc.Rmd | Subset and re-process cells that were identified as B lineage lymphocytes |
-13b_Ileum_B_HierarchicalClustering.Rmd
-13c_Ileum_B_OverallDGE.Rmd
-13d_Ileum_B_PredictionMapping_Visualization.Rmd
-13e_Ileum_B_SpatialDGE.Rmd
-14a_Ileum_Myeloid_Subset_DimReduc.Rmd
-14b_Ileum_Myeloid_HierarchicalClustering.Rmd
-14c_Ileum_Myeloid_OverallDGE.Rmd
-14d_Ileum_Myeloid_PredictionMapping_Visualize.Rmd
-14e_Ileum_Myeloid_SpatialDGE.Rmd
-15a_Ileum_NonImmune_Subset_DimReduc.Rmd
-15b_Ileum_NonImmune_HierarchicalClustering.Rmd
-15c_Ileum_NonImmune_OverallDGE.Rmd
-15d_Ileum_NonImmune_PredictionMapping_Visualization.Rmd
-15e_Ileum_NonImmune_SpatialDGE.Rmd
-16a_Ileum_AllCellsAnnot_GenCharacterization.Rmd
-16b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd
+| 13b_Ileum_B_HierarchicalClustering.Rmd | Hierarchical clustering of the data to determine phylogenetic relationship amongst only B lineage lymphocyte clusters |
+| 13c_Ileum_B_OverallDGE.Rmd | Cluster-based differential gene expression analysis to determine genes differentially expressed in a single B lineage lymphocyte cluster relative to the rest of the B lineage lymphocytes |
+| 13d_Ileum_B_PredictionMapping_Visualization.Rmd | Visualize the results of cell mapping and label prediction for only B lineage lymphocytes |
+| 13e_Ileum_B_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only B lineage lymphocytes in multidimensional data space |
+| 14a_Ileum_Myeloid_Subset_DimReduc.Rmd | Subset and re-process cells that were identified as myeloid lineage leukocytes |
+| 14b_Ileum_Myeloid_HierarchicalClustering.Rmd | Hierarchical clustering of the data to determine phylogenetic relationship amongst only myeloid lineage leukocyte clusters |
+| 14c_Ileum_Myeloid_OverallDGE.Rmd | Cluster-based differential gene expression analysis to determine genes differentially expressed in a single myeloid lineage leukocyte cluster relative to the rest of the myeloid lineage leukocytes |
+| 14d_Ileum_Myeloid_PredictionMapping_Visualize.Rmd | Visualize the results of cell mapping and label prediction for only myeloid lineage leukocytes |
+| 14e_Ileum_Myeloid_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only myeloid lineage leukocytes in multidimensional data space |
+| 15a_Ileum_NonImmune_Subset_DimReduc.Rmd | Subset and re-process cells that were identified as non-leukocytes |
+| 15b_Ileum_NonImmune_HierarchicalClustering.Rmd | Hierarchical clustering of the data to determine phylogenetic relationship amongst only non-leukocyte clusters |
+| 15c_Ileum_NonImmune_OverallDGE.Rmd | Cluster-based differential gene expression analysis to determine genes differentially expressed in a single non-leukocyte cluster relative to the rest of the non-leukocytes |
+| 15d_Ileum_NonImmune_PredictionMapping_Visualization.Rmd | Visualize the results of cell mapping and label prediction for only non-leukocytes |
+| 15e_Ileum_NonImmune_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only non-leukocytes in multidimensional data space |
+| 16a_Ileum_AllCellsAnnot_GenCharacterization.Rmd | ______ |
+| 16b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd
 16c_Ileum_AllCellsAnnot_OverallDGE.Rmd
 16d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd
 16e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd
