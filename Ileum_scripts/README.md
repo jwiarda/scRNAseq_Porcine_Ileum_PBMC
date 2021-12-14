@@ -77,12 +77,12 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 15c_Ileum_NonImmune_OverallDGE.Rmd | Cluster-based differential gene expression analysis to determine genes differentially expressed in a single non-leukocyte cluster relative to the rest of the non-leukocytes |
 | 15d_Ileum_NonImmune_PredictionMapping_Visualization.Rmd | Visualize the results of cell mapping and label prediction for only non-leukocytes |
 | 15e_Ileum_NonImmune_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only non-leukocytes in multidimensional data space |
-| 16a_Ileum_AllCellsAnnot_GenCharacterization.Rmd | ______ |
-| 16b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd
-16c_Ileum_AllCellsAnnot_OverallDGE.Rmd
-16d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd
-16e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd
-16f_Ileum_AllCellsAnnot_VisualizeMapPredict.Rmd
+| 16a_Ileum_AllCellsAnnot_GenCharacterization.Rmd | General characterization of the data similar to 06a but with official cell type/lineage annotations instead of cell clusters |
+| 16b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd | Hierarchical clustering of the data similar to 06b but with official cell type/lineage annotations instead of cell clusters |
+| 16c_Ileum_AllCellsAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 06c but with official cell type/lineage annotations instead of cell clusters |
+| 16d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd | Differential gene expression analysis similar to 06d but with official cell type/lineage annotations instead of cell clusters |
+| 16e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd | Pseudobulk correlation analysis similar to 06e but with official cell type/lineage annotations instead of cell clusters |
+| 16f_Ileum_AllCellsAnnot_VisualizeMapPredict.Rmd
 17a_Ileum_TILCAnnot_GenCharacterization.Rmd
 17b_Ileum_TILCAnnot_HierarchicalClustering.Rmd
 17c_Ileum_TILCAnnot_OverallDGE.Rmd
