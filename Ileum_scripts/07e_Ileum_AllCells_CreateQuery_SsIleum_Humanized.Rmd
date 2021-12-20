@@ -1,0 +1,145 @@
+---
+title: "Reference-based Label Prediction and Mapping of Porcine Ileal Cells: Creation of Humanized Porcine Ileum Query Datasets"
+author: "Jayne Wiarda"
+date: "5Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Since there are already some pretty spectacular and well-annotated scRNA-seq datasets available in literature, we can utilize these external datasets as references we can compare to our porcine ileum scRNA-seq data, which we treat as a dataset to query. We can perform reference-based label transfer to predict the most similar cellular counterparts in already annotated datasets we use as references (Which reference cells are our query cells most similar to?), and we can further calculate mapping scores to see how well query data (our porcine ileum scRNA-seq data) is represented by the reference dataset (How well does the reference data truly resemble the query data?).
+
+Unfortunately, we are the first to create a scRNA-seq dataset of cells in the porcine intestine, so we have to compare to other reference datasets either within the same species but across anatomical locations or within the same tissue but across species. To compare across species, we must also adjust our gene count matrices to include only gene orthologs in our query data. Thus, we create three 'versions' of our query datasets:
+
+* Query data with all expressed genes and porcine gene names, as used in previous analyses of the porcine ileum scRNA-seq data, referred to as query_SsIleum_Wiarda
+* Query data with only one-to-one human-to-pig gene orthologs and genes converted to human gene names, referred to as query_SsIleum_Wiarda_humanized
+* Query data with only one-to-one mouse-to-pig gene orthologs and genes converted to murine gene names, referred to as query_SsIleum_Wiarda_murinized
+
+Our query_SsIleum_Wiarda_humanized data can then be directly compared to human reference datasets that have also been filtered to contain only one-to-one human-to-pig gene orthologs (with human gene names present in the reference), while our query_SsIleum_Wiarda_murinized data can be compared directly to murine reference datasets filtered to contain only one-to-one mouse-to-pig gene orthologs (with murine gene names present in the reference).
+
+In this analysis, we create query datasets that can be compared directly to other human scRNA-seq reference datasets (query_SsIleum_Wiarda_humanized).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+### Load required software packages
+
+The R package, Seurat (Stuart & Butler et al. 2019; Hao et al. 2020), is utilized to perform label transfer and mapping. Note, this analysis is done with an upgraded version of Seurat compared to other analyses, and is also performed on another machine. We also utilize the R package, future (Bengtsson 2020), to parallelize some of the steps performed herein. Refer to sessionInfo() at the bottom of the page for the R and package versions used and additional information.
+
+Additional packages used: ggplot2 (Wickham 2016); dplyr (Wickham et al. 2020)
+
+```{r, message = FALSE}
+library(ggplot2)
+library(Seurat)
+library(future)
+library(dplyr)
+```
+
+## Create humanized porcine ileum query datasets
+
+### Load in gene ortholog information:
+
+Read in human-to-pig gene ortholog information, obtained from biomaRt (Durinck et al. 2009; Durinck et al. 2005; obtained according to instructions outlined at https://www.ensembl.info/2009/01/21/how-to-get-all-the-orthologous-genes-between-two-species/ but specifying human and pig instead of human and mouse), and filter down to only one-to-one gene orthologs:
+
+```{r, warning = FALSE, error = FALSE}
+orthoGenes <- read.delim("/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/OrthoGenes/PIGvsHUMAN_GeneOrtholog_06022020.txt", # read in gene ortholog file
+                         header = TRUE, 
+                         skip = 1, 
+                         sep = "\t")
+orthoGenes <- subset(orthoGenes, Human.homology.type == 'ortholog_one2one') # subset to only one to one orthologs
+```
+
+### Load relevant data:
+
+Load in the scRNA-seq porcine ileum Seurat object we've been working with in previous analyses:
+
+```{r, warning = FALSE, error = FALSE}
+SsIleum_Wiarda <- readRDS("/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds") # read in our pig ileum atlas dataset
+```
+
+### Allow parallelization 
+
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+### Filter down to only gene orthologs and convert to human gene names
+
+```{r, warning = FALSE, error = FALSE}
+SsIleum_Wiardagenes <- as.data.frame(rownames(SsIleum_Wiarda[['RNA']]@counts)) # extract pig gene names from dataset
+colnames(SsIleum_Wiardagenes) <- 'gene'
+pigGenes <- read.delim("/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/QC/UnfilteredGeneInfo.txt", header = TRUE, sep = " ") # read in unfiltered gene info
+SsIleum_Wiardanames <- merge(SsIleum_Wiardagenes, pigGenes, by.x = "gene", by.y = "Name") # merge together unfiltered gene info with genes present in our pig ileum atlas
+SsIleum_Wiardanames <- merge(SsIleum_Wiardanames, orthoGenes, by.x = "EnsemblID", by.y = "Gene.stable.ID") # merge with refined ortho gene list
+dim(SsIleum_Wiardanames) # how many genes in our dataset are orthologs?
+# [1] 13696    25
+SsIleum_Wiardacounts <- SsIleum_Wiarda[['RNA']]@counts[rownames(SsIleum_Wiarda[['RNA']]@counts) %in% SsIleum_Wiardanames$gene,]
+dim(SsIleum_Wiardacounts) # rows should be same as SsIleum_Wiardanames
+# [1] 13696 31983
+SsIleum_Wiardanames <- SsIleum_Wiardanames %>% arrange(factor(gene, levels = rownames(SsIleum_Wiardacounts))) # arrange SsIleum_Wiardanames in same order as SsIleum_Wiardacounts
+rownames(SsIleum_Wiardacounts) <- SsIleum_Wiardanames$Human.gene.name # change pig genes to human gene names
+SsIleum_WiardaMeta <- SsIleum_Wiarda@meta.data
+```
+
+Create a Seurat object with ortholog genes:
+
+```{r, warning = FALSE, error = FALSE}
+SsIleum_Wiarda <- CreateSeuratObject(counts = SsIleum_Wiardacounts, # create new Seurat object for our query dataset
+                                     meta.data = SsIleum_WiardaMeta)
+```
+
+### Normalization, scaling, and dimensionality reduction
+
+Split the data into individual samples:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+SsIleum_Wiarda.list <- SplitObject(SsIleum_Wiarda, 
+                                   split.by = "SampleID") # split into the original samples that were processed for scRNA-seq
+```
+
+At this point, we treat data from each sample as an independent entity, giving us six query datasets that need to be processed. For each sample, normalize the data, find the top 2,000 most variable genes, scale the data, and run PCA for the first 50 PCs:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+for (i in 1:length(SsIleum_Wiarda.list)) { # for each sample individually, let's normalize the data and find the 2000 most highly variable features, scale the data, and find top 50 PCs
+  SsIleum_Wiarda.list[[i]] <- NormalizeData(SsIleum_Wiarda.list[[i]], 
+                                            verbose = TRUE, 
+                                            normalization.method = "LogNormalize", 
+                                            scale.factor = 10000, 
+                                            assay = "RNA")
+  SsIleum_Wiarda.list[[i]] <- FindVariableFeatures(SsIleum_Wiarda.list[[i]], 
+                                                   selection.method = "vst", 
+                                                   nfeatures = 2000, 
+                                                   verbose = TRUE)
+  SsIleum_Wiarda.list[[i]] <- ScaleData(SsIleum_Wiarda.list[[i]]) # scale the data
+  SsIleum_Wiarda.list[[i]] <- RunPCA(SsIleum_Wiarda.list[[i]], # calculate 100 PCs
+                                     npcs = 50, 
+                                     verbose = TRUE)
+}
+```
+
+### Save the query datasets as a Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+saveRDS(SsIleum_Wiarda.list, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/QueryData/query_SsIleum_Wiarda_humanized.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Integrated analysis of multimodal single-cell data. Yuhan Hao, Stephanie Hao, Erica Andersen-Nissen, William M. Mauck III, Shiwei Zheng, Andrew Butler, Maddie J. Lee, Aaron J. Wilk, Charlotte Darby, Michael Zagar, Paul Hoffman, Marlon Stoeckius, Efthymia Papalexi, Eleni P. Mimitou, Jaison Jain, Avi Srivastava, Tim Stuart, Lamar B. Fleming, Bertrand Yeung, Angela J. Rogers, Juliana M. McElrath, Catherine A. Blish, Raphael Gottardo, Peter Smibert, Rahul Satija. bioRxiv 2020.10.12.335331; doi: https://doi.org/10.1101/2020.10.12.335331
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+ 
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr

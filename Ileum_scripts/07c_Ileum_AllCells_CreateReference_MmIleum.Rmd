@@ -1,0 +1,357 @@
+---
+title: "Reference-based Label Prediction and Mapping of Porcine Ileal Cells: Creation of a Human Ileum Reference Dataset"
+author: "Jayne Wiarda"
+date: "5Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Since there are already some pretty spectacular and well-annotated scRNA-seq datasets available in literature, we can utilize these external datasets as references we can compare to our porcine ileum scRNA-seq data, which we treat as a dataset to query. We can perform reference-based label transfer to predict the most similar cellular counterparts in already annotated datasets we use as references (Which reference cells are our query cells most similar to?), and we can further calculate mapping scores to see how well query data (our porcine ileum scRNA-seq data) is represented by the reference dataset (How well does the reference data truly resemble the query data?).
+
+Unfortunately, we are the first to create a scRNA-seq dataset of cells in the porcine intestine, so we have to compare to other reference datasets either within the same species but across anatomical locations or within the same tissue but across species. Here are the three relevant datasets we found:
+
+* A scRNA-seq dataset cataloging porcine PBMCs (Herrera-Uribe & Wiarda et al. 2021); referred to as SsPBMC_HerreraWiarda) 
+  - Cells are from seven conventional pigs of various ages, including two pigs (ExpD) which are the same as the ones we collected ileum samples from for our ileum scRNA-seq dataset
+  - Data can be found at locations specified in the manuscript, but we recovered the data in-house from our previous analyses
+  - We removed one cluster labelled as 'Unknown' (cluster 34) prior to creating our reference
+* A scRNA-seq dataset cataloging cells from human terminal ileum (Elmentaite et al. 2020; referred to as HsIleum_Elmentaite)
+  - Cells are from 8 healthy controls and 7 samples from individuals with Crohn's disease
+  - Data were downloaded as pediatric_RAWCOUNTS_cellxgene.h5ad from at https://www.gutcellatlas.org/#fetal
+  - Prior to creating the reference, we selected only cells with an inferred state of control for creating our reference, thus excluding cells from Crohn's disease patients, and retained only one-to-one gene orthologs between pig and human
+* A scRNA-seq dataset cataloging cells from murine ileum (Xu et al. 2019; referred to as MmIleum_Xu)
+  - Cells are from healthy or allergy model mice
+  - Data were downloaded from the Single Cell Portal, found at https://singlecell.broadinstitute.org/single_cell/study/SCP210/fasi-immune-mouse-small-intestine#study-summary
+  - Prior to creating the reference, we selected only cells from control mice, thus exluding cells from mice modelling an allergic response, and retained only one-to-one gene orthologs between pig and mouse
+  
+In this section, we go over the steps involved in creating a reference dataset from human ileum.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+### Load required software packages
+
+The R package, Seurat (Stuart & Butler et al. 2019; Hao et al. 2020), is utilized to perform label transfer and mapping. Note, this analysis is done with an upgraded version of Seurat compared to other analyses, and is also performed on another maching. We also utilize the R package, future (Bengtsson 2020), to parallelize some of the steps performed herein. Refer to sessionInfo() at the bottom of the page for the R and package versions used and additional information.
+
+Additional packages used: ggplot2 (Wickham 2016)
+
+```{r, message = FALSE}
+library(ggplot2)
+library(Seurat)
+library(future)
+```
+
+## Create murine ileum reference dataset
+
+### Load in gene ortholog information:
+
+Read in mouse-to-pig gene ortholog information, obtained from biomaRt (Durinck et al. 2009; Durinck et al. 2005; obtained according to instructions outlined at https://www.ensembl.info/2009/01/21/how-to-get-all-the-orthologous-genes-between-two-species/ but specifying mouse and pig instead of human and mouse), and filter down to only one-to-one gene orthologs:
+
+```{r, warning = FALSE, error = FALSE}
+orthoGenes <- read.delim("/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/OrthoGenes/PIGvsMOUSE_Orthologs102_12112020.txt", # read in gene ortholog file
+                         header = TRUE, 
+                         sep = "\t")
+orthoGenes <- subset(orthoGenes, Mouse.homology.type == 'ortholog_one2one') # subset to only one to one orthologs
+```
+
+### Load relevant data:
+
+Downloaded GSE124880_PP_LP_mm10_count_barcode.tsv.gz, GSE124880_PP_LP_mm10_count_gene.tsv.gz, GSE124880_PP_LP_mm10_count_matrix.mtx.gz under GSE accession GSE124880. Cell annotations derived from those described in publication doi.org/10.1016/j.immuni.2019.09.004.
+
+```{r, warning = FALSE, error = FALSE}
+data_dir <- "/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/ReferenceData/Xu_MmIleum/GEO"
+list.files(data_dir) # Should show barcodes.tsv, genes.tsv, and matrix.mtx files
+scRNA_data <- Read10X(data.dir = data_dir, # read the 10X data from all samples into a data matrix
+                      gene.column = 1) # change gene column to 1 since no column 2 Ensembl IDs were provided in the genes.tsv file
+MmIleum_Xu <- CreateSeuratObject(counts = scRNA_data, # create a Seurat object of the data matrix
+                                 min.features = 50, # include only cells with at least 50 UMIs from the raw matrix
+                                 min.cells = 1) # include only genes expressed in at least one cell
+MmIleum_Xu # let's see what we have...
+```
+
+### Allow parallelization 
+
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+### Add in more metadata
+
+Add in more metadata that we downloaded from the dataset from Single Cell Portal:
+
+```{r, warning = FALSE, error = FALSE}
+clusters <- read.delim('/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/ReferenceData/Xu_MmIleum/Food-Allergy-PP-LP_cluster_v1.txt', skip = 1) # bring in cluster information for our cells that was obtained from https://singlecell.broadinstitute.org/single_cell/study/SCP210/fasi-immune-mouse-small-intestine
+clusters$cellIDs <- clusters$TYPE
+clusters$cellIDs <- substring(clusters$cellIDs, 17) # these are now our sample IDs
+clusters$TYPE <- sub("_[^_]+$", "", clusters$TYPE) # get rid of the cell-specific barcode at end of each cell ID so that we now have only the sample IDs listed
+unique(clusters$TYPE) # see the different samples under TYPE column in clusters; note these are slightly different from the identities used for SampleIDs...these all start with Food-Allergy-PP_ or Food-Allergy-LP_
+clusters$SampleID <- substring(clusters$TYPE, 17) # these are now our sample IDs
+clusters$compartment <- substr(clusters$TYPE, 14, 15) # these are now our distinctions between Peyer's patches and lamina propria
+rownames(clusters) <- clusters$cellIDs # change rownames to cell barcodes
+MmIleum_Xu <- AddMetaData(object = MmIleum_Xu, # add metadata to Seurat object
+                          metadata = clusters)
+```
+
+### Remove cells from allergy model mice
+
+Only retain cells from healthy controls, which have a C_, ctrl, or Control designation in the names stored under the SampleID data slot:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(MmIleum_Xu) <- MmIleum_Xu$SampleID
+levels(Idents(MmIleum_Xu)) # look at levels and identify only the samples from non-allergy responses, indicated in latter part of names as C_, ctrl, or Control
+MmIleum_Xu <- subset(MmIleum_Xu, idents = c("04242017_PP_location_WT_Allergy_v2_CD", # take only samples from non-allergy animals
+                                            "04242017_PP_location_WT_Allergy_v2_CJ",
+                                            "05152017_PP_location_WTAllergy_v2_CD",
+                                            "05152017_PP_location_WTAllergy_v2_CJ",
+                                            "06132017_PP_WT_Allergy_v2_ctrl",
+                                            "07142017_PP_WT_Allergy_v2_Control",
+                                            "09012017_PP_WT_Allergy_v2_Control_2",
+                                            "10172017_ctrl_allergy_nonPP_nonTB_v2_Ctrl_2",
+                                            "11292017_IgDnegSI_nonTBSI_v2_Ctrl_nonTB",
+                                            "04242017_PP_location_WT_Allergy_v2_CI",
+                                            "05152017_PP_location_WTAllergy_v2_CI",
+                                            "09012017_PP_WT_Allergy_v2_Control_1",
+                                            "10172017_ctrl_allergy_nonPP_nonTB_v2_Ctrl_1",
+                                            "11292017_IgDnegSI_nonTBSI_v2_Ctrl_IgDLow"))
+MmIleum_Xu # now see we have fewer cells
+```
+
+### Remove poor quality and unidentified cells
+
+Some clusters were unidentifed or had low UMI counts. We are going to remove these clusters:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(MmIleum_Xu) <- MmIleum_Xu$group # change identities to cluster numbers from publication
+MmIleum_Xu <- subset(MmIleum_Xu, 
+                     idents = c('13', '18', '42', '23', '29', '43', '15', '16', '27', '37', '34', '41', '28', '40', '39'),  # remove cells belonging to these clusters that were specified as having low UMI counts, doublets, or unresolved identities in publication
+                     invert = TRUE) # exclude specified identities
+MmIleum_Xu # now see we have fewer cells again
+```
+
+### Filter genes
+
+Filter the genes to include only one-to-one human-to-pig gene orthologs:
+
+```{r, warning = FALSE, error = FALSE}
+MmIleum_Xugenes <- rownames(MmIleum_Xu[['RNA']]@counts) # extract gene names from reference dataset
+MmIleum_Xuorthos <- intersect(MmIleum_Xugenes, orthoGenes$Mouse.gene.name) # find which gene names from reference are also one-to-one orthologs
+length(MmIleum_Xuorthos) # how many genes are orthologs?
+MmIleum_Xucounts <- MmIleum_Xu[['RNA']]@counts[rownames(MmIleum_Xu[['RNA']]@counts) %in% MmIleum_Xuorthos,] # make count matrix from referemce, only taking counts from one-to-one ortholog genes
+dim(MmIleum_Xucounts) # number of rows should match length(MmIleum_Xuorthos)
+MmIleum_XuMeta <- MmIleum_Xu@meta.data # extract all the meta data from reference
+dim(MmIleum_XuMeta) # look at dimensions of meta data
+```
+
+Create a Seurat object of only our control sample cells with ortholog genes:
+
+```{r, warning = FALSE, error = FALSE}
+MmIleum_Xu <- CreateSeuratObject( # now create new Seurat object with only the control cells, orthologous genes, and all meta data
+  counts = MmIleum_Xucounts, 
+  meta.data = MmIleum_XuMeta)
+```
+
+### Re-normalize and re-integrate the data
+
+Split the data into individual samples:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+MmIleum_Xu.list <- SplitObject(MmIleum_Xu, split.by = "SampleID") # split into the original samples that were processed for scRNA-seq
+```
+
+For each sample, normalize the data and find the top 2,000 most variable genes:
+
+```{r, warning = FALSE, error = FALSE}
+for (i in 1:length(MmIleum_Xu.list)) { # for each sample individually, let's normalize the data and find the 2000 most highly variable features
+  MmIleum_Xu.list[[i]] <- NormalizeData(MmIleum_Xu.list[[i]], 
+                                                verbose = TRUE, 
+                                                normalization.method = "LogNormalize", 
+                                                scale.factor = 10000, 
+                                                assay = "RNA")
+  MmIleum_Xu.list[[i]] <- FindVariableFeatures(MmIleum_Xu.list[[i]], 
+                                                       selection.method = "vst", 
+                                                       nfeatures = 2000, 
+                                                       verbose = TRUE)
+}
+```
+
+Integrate the samples together:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+MmIleum_Xu.anchors <- FindIntegrationAnchors(object.list = MmIleum_Xu.list, 
+                                                     dims = 1:30) # find integration anchors between samples based on variable features for each sample with default parameters
+referenceMmIleum_Xu <- IntegrateData(anchorset = MmIleum_Xu.anchors, 
+                                             dims = 1:30) # integrate the data together based on integration anchors found with default parameters
+```
+
+### Re-scale data
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+referenceMmIleum_Xu <- ScaleData(referenceMmIleum_Xu, 
+                                         verbose = TRUE, 
+                                         assay = 'integrated') # scale the genes in the integrated assay
+```
+
+### Re-run PCA analysis
+
+Calculate the PCs of the integrated dataset:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+referenceMmIleum_Xu <- RunPCA(referenceMmIleum_Xu, # calculate first 100 PCs
+                                      npcs = 100, 
+                                      verbose = TRUE)
+```
+
+Visualize our PCs in an elbow plot:
+
+```{r, warning = FALSE, error = FALSE}
+ElbowPlot(referenceMmIleum_Xu,
+          ndims = 100) # look at this plot to find the 'elbow' for significant PCs... use this number of PCs for creating UMAP, tSNE, & cell neighbors & clustering
+```
+
+Quantitiatively calculate how many PCs to use:
+
+```{r, warning = FALSE, error = FALSE}
+pct <- referenceMmIleum_Xu[["pca"]]@stdev / sum(referenceMmIleum_Xu[["pca"]]@stdev) * 100 # find standard deviation for each PC
+cumu <- cumsum(pct) # find cumulative percentages for PCs
+co1 <- which(cumu > 90 & pct < 5)[1] # find PC representing cumulative percent >90% and less than 5% associated with the single PC
+co1 # list PC
+co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.1), decreasing = T)[1] + 1 # find last PC where change in percent variation is more than 0.1%
+co2 # list PC
+pcs <- min(co1, co2) # find the minimum PC from the 2 methods used above
+pcs # list PC
+```
+
+Plot our findings:
+
+```{r, warning = FALSE, error = FALSE}
+plot_df <- data.frame(pct = pct, # put PC values into dataframe for plotting
+                      cumu = cumu, 
+                      rank = 1:length(pct))
+ggplot(plot_df, aes(cumu, pct, label = rank, color = rank > pcs)) + # visualize PCs to use in elbow plot
+  geom_text() + 
+  geom_vline(xintercept = 90, color = "grey") + 
+  geom_hline(yintercept = min(pct[pct > 5]), color = "grey") +
+  theme_bw()
+```
+
+Store information for PCs to use in future computations:
+
+```{r, warning = FALSE, error = FALSE}
+PCdims <- 1:pcs # use the minimum PC from the quantitative method above to set the PCs for subsequent steps
+length(PCdims) # how many significant PCs are there?
+```
+
+### Construct UMAP
+
+Create a UMAP, using the calculated number of PCs from above:
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+referenceMmIleum_Xu <- RunUMAP(referenceMmIleum_Xu, 
+                                       dims = PCdims, 
+                                       reduction = "pca", 
+                                       assay = "SCT") # create UMAP
+```
+
+Now check out plotting of some of the metadata groupings:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 8, fig.width = 15}
+DimPlot(referenceMmIleum_Xu, 
+        group.by = "SampleID") # plot by sample ID
+DimPlot(referenceMmIleum_Xu, 
+        group.by = "group") # plot by cell cluster numbers assigned in publication
+```
+
+### Identify and organize cells 
+
+Create a new data slot, called cellType, based on cluster IDs listed under group dataslot and IDs given in publication:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(referenceMmIleum_Xu) <- referenceMmIleum_Xu$group # change identities to cell annotations from publication
+levels(Idents(referenceMmIleum_Xu)) # see order of groups
+# [1] "5"  "2"  "1"  "7"  "10" "17" "38" "9"  "32" "20" "4"  "3"  "19" "35" "6"  "14" "30" "31" "12" "21" "8"  "11" "22" "33" "24" "25" "26" "36" "45" "44" "46"
+cellTypeList <- c('CD8T T cell', 'Resting B cell', 'Resting CD4pos T cell', 'Activated CD4pos T cell', 'GC B cell (LZ)', 'gd T cell (XCL1pos)',
+                  'gd T cel (GZMApos)', 'GC B cell (DZ)', 'Stromal cell (DN)', 'Plasma cell', 'LTi cell', 'ILC3', 'NKT cell', 'Epithelial cell C2',
+                  'pDC', 'DC (CD103posCD11bpos)', 'Epithelial cell C1', 'DC (CD103neg C2)', 'ILC2', 'DC (CD103posCD11bneg)', 'NK cell', 'ILC1', 'Macrophage', 
+                  'Fibroblast', 'DC (CD103neg C1)', 'Endothelial cell', 'Mast cell', 'Neutrophil', 'T precursor-like cell', 'Basophil', 'Lymphatic endothelial-like cell')
+referenceMmIleum_Xu$cellType <-referenceMmIleum_Xu$group # make a new data slot based off cell groups
+Idents(referenceMmIleum_Xu) <- referenceMmIleum_Xu$cellType
+names(cellTypeList) <- levels(referenceMmIleum_Xu)
+referenceMmIleum_Xu <- RenameIdents(referenceMmIleum_Xu, cellTypeList) # change dataset identity to cell types
+referenceMmIleum_Xu$cellType <- Idents(referenceMmIleum_Xu)
+```
+
+Reorder our cellType IDs:
+
+```{r, warning = FALSE, error = FALSE}
+levels(referenceMmIleum_Xu) <- c('CD8T T cell','Resting CD4pos T cell','Activated CD4pos T cell','gd T cell (XCL1pos)','gd T cel (GZMApos)','LTi cell','ILC3', 'NKT cell','ILC2', 'NK cell', 'ILC1','T precursor-like cell',
+                                 'Resting B cell','GC B cell (LZ)','GC B cell (DZ)','Plasma cell',
+                                 'Stromal cell (DN)','Epithelial cell C2','Epithelial cell C1','Fibroblast', 'Endothelial cell', 'Lymphatic endothelial-like cell',
+                                 'pDC', 'DC (CD103posCD11bpos)','DC (CD103neg C2)','DC (CD103posCD11bneg)','Macrophage','DC (CD103neg C1)','Mast cell', 'Neutrophil','Basophil') # Reorder the clusters based on cell type IDs 
+referenceMmIleum_Xu$cellType <- Idents(referenceMmIleum_Xu) # apply new order to the identities in the Seurat object
+```
+
+Now plot these new cell classifications on our UMAP:
+
+```{r, warning = FALSE, error = FALSE, fig.height = 10, fig.width = 20}
+DimPlot(referenceMmIleum_Xu, # let's see where these cell types fall out in our 2-D visualization plot again
+        group.by = "cellType", 
+        label = TRUE)
+```
+
+Also assign cell lineages to cells:
+
+```{r, warning = FALSE, error = FALSE}
+Idents(referenceMmIleum_Xu) <- referenceMmIleum_Xu$cellType
+cellLineageList <- c(rep('T/ILC lineage', 12), rep('B lineage', 4), rep('Non-immune', 6),rep('Myeloid lineage', 9))
+referenceMmIleum_Xu$cellLineage <- referenceMmIleum_Xu$cellType # make a new data slot based off cell lineage groupings
+Idents(referenceMmIleum_Xu) <- referenceMmIleum_Xu$cellLineage
+names(cellLineageList) <- levels(referenceMmIleum_Xu)
+referenceMmIleum_Xu <- RenameIdents(referenceMmIleum_Xu, cellLineageList) # change dataset identity to cell lineages
+referenceMmIleum_Xu$cellLineage <- Idents(referenceMmIleum_Xu)
+```
+
+And plot cell lineage classifications onto the UMAP too:
+
+```{r, warning = FALSE, error = FALSE}
+DimPlot(referenceMmIleum_Xu, # let's see where these cell lineages fall out in our 2-D visualization plot again
+        group.by = "cellLineage", 
+        label = TRUE)
+```
+
+### Save the reference dataset as a Seurat object:
+
+```{r, warning = FALSE, error = FALSE}
+saveRDS(referenceMmIleum_Xu, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/ReferenceData/Xu_MmIleum/reference_MmIleum_Xu.rds')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Mapping identifiers for the integration of genomic datasets with the R/Bioconductor package biomaRt. Steffen Durinck, Paul T. Spellman, Ewan Birney and Wolfgang Huber, Nature Protocols 4, 1184-1191 (2009).
+  
+BioMart and Bioconductor: a powerful link between biological databases and microarray data analysis. Steffen Durinck, Yves Moreau, Arek Kasprzyk, Sean Davis, Bart De Moor, Alvis Brazma and Wolfgang Huber, Bioinformatics 21, 3439-3440 (2005).
+
+Integrated analysis of multimodal single-cell data. Yuhan Hao, Stephanie Hao, Erica Andersen-Nissen, William M. Mauck III, Shiwei Zheng, Andrew Butler, Maddie J. Lee, Aaron J. Wilk, Charlotte Darby, Michael Zagar, Paul Hoffman, Marlon Stoeckius, Efthymia Papalexi, Eleni P. Mimitou, Jaison Jain, Avi Srivastava, Tim Stuart, Lamar B. Fleming, Bertrand Yeung, Angela J. Rogers, Juliana M. McElrath, Catherine A. Blish, Raphael Gottardo, Peter Smibert, Rahul Satija. bioRxiv 2020.10.12.335331; doi: https://doi.org/10.1101/2020.10.12.335331
+
+Reference transcriptomes of porcine peripheral immune cells created through bulk and single-cell RNA sequencing
+Juber Herrera-Uribe, Jayne E Wiarda, Sathesh K Sivasankaran, Lance Daharsh, Haibo Liu, Kristen A Byrne, Timothy Smith, Joan K Lunney, Crystal L Loving, Christopher K Tuggle
+bioRxiv 2021.04.02.438107; doi: https://doi.org/10.1101/2021.04.02.438107
+
+Elmentaite R, Ross ADB, Roberts K, James KR, Ortmann D, Gomes T, Nayak K, Tuck L, Pritchard S, Bayraktar OA, Heuschkel R, Vallier L, Teichmann SA, Zilbauer M. Single-Cell Sequencing of Developing Human Gut Reveals Transcriptional Links to Childhood Crohn's Disease. Dev Cell. 2020 Dec 21;55(6):771-783.e5. doi: 10.1016/j.devcel.2020.11.010.
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+ 
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+  
+Heping Xu, Jiarui Ding, Caroline B.M. Porter, Antonia Wallrapp, Marcin Tabaka, Sai Ma, Shujie Fu, Xuanxuan Guo, Samantha J. Riesenfeld, Chienwen Su, Danielle Dionne, Lan T. Nguyen, Ariel Lefkovith, Orr Ashenberg, Patrick R. Burkett, Hai Ning Shi, Orit Rozenblatt-Rosen, Daniel B. Graham, Vijay K. Kuchroo, Aviv Regev, Ramnik J. Xavier. Transcriptional Atlas of Intestinal Immune Cells Reveals that Neuropeptide α-CGRP Modulates Group 2 Innate Lymphoid Cell Responses. Immunity, Volume 51, Issue 4, 2019, Pages 696-708.e9. doi: 10.1016/j.immuni.2019.09.004.

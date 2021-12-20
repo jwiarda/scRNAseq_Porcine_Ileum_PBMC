@@ -1,0 +1,186 @@
+---
+title: "Reference-based Label Prediction and Mapping of Porcine Ileal Cells to Porcine PBMCs"
+author: "Jayne Wiarda"
+date: "5Apr2021"
+output: 
+  github_document: 
+    keep_html: TRUE
+---
+
+Since there are already some pretty spectacular and well-annotated scRNA-seq datasets available in literature, we can utilize these external datasets as references we can compare to our porcine ileum scRNA-seq data, which we treat as a dataset to query. We can perform reference-based label transfer to predict the most similar cellular counterparts in already annotated datasets we use as references (Which reference cells are our query cells most similar to?), and we can further calculate mapping scores to see how well query data (our porcine ileum scRNA-seq data) is represented by the reference dataset (How well does the reference data truly resemble the query data?).
+
+Up to this point, we've prepared three reference datasets:
+
+* A scRNA-seq dataset cataloging porcine PBMCs (Herrera-Uribe & Wiarda et al. 2021); referred to as SsPBMC_HerreraWiarda) 
+  - Cells are from seven conventional pigs of various ages, including two pigs (ExpD) which are the same as the ones we collected ileum samples from for our ileum scRNA-seq dataset
+  - Data can be found at locations specified in the manuscript, but we recovered the data in-house from our previous analyses
+  - We removed one cluster labelled as 'Unknown' (cluster 34) prior to creating our reference
+* A scRNA-seq dataset cataloging cells from human terminal ileum (Elmentaite et al. 2020; referred to as HsIleum_Elmentaite)
+  - Cells are from 8 healthy controls and 7 samples from individuals with Crohn's disease
+  - Data were downloaded as pediatric_RAWCOUNTS_cellxgene.h5ad from at https://www.gutcellatlas.org/#fetal
+  - Prior to creating the reference, we selected only cells with an inferred state of control for creating our reference, thus excluding cells from Crohn's disease patients, and retained only one-to-one gene orthologs between pig and human
+* A scRNA-seq dataset cataloging cells from murine ileum (Xu et al. 2019; referred to as MmIleum_Xu)
+  - Cells are from healthy or allergy model mice
+  - Data were downloaded from the Single Cell Portal, found at https://singlecell.broadinstitute.org/single_cell/study/SCP210/fasi-immune-mouse-small-intestine#study-summary
+  - Prior to creating the reference, we selected only cells from control mice, thus exluding cells from mice modelling an allergic response, and retained only one-to-one gene orthologs between pig and mouse
+  
+And we've also prepared three query datasets:
+
+* Query data with all expressed genes and porcine gene names, as used in previous analyses of the porcine ileum scRNA-seq data, referred to as query_SsIleum_Wiarda
+* Query data with only one-to-one human-to-pig gene orthologs and genes converted to human gene names, referred to as query_SsIleum_Wiarda_humanized
+* Query data with only one-to-one mouse-to-pig gene orthologs and genes converted to murine gene names, referred to as query_SsIleum_Wiarda_murinized
+
+Our query_SsIleum_Wiarda_humanized data can then be directly compared to human reference datasets that have also been filtered to contain only one-to-one human-to-pig gene orthologs (with human gene names present in the reference), while our query_SsIleum_Wiarda_murinized data can be compared directly to murine reference datasets filtered to contain only one-to-one mouse-to-pig gene orthologs (with murine gene names present in the reference).
+
+In this analysis, we finally perform reference-based label prediction and mapping of our porcine ileum scRNA-seq data and a reference dataset of porcine PBMCs.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.fullwidth=TRUE)
+```
+
+### Load required software packages
+
+The R package, Seurat (Stuart & Butler et al. 2019; Hao et al. 2020), is utilized to perform label transfer and mapping. Note, this analysis is done with an upgraded version of Seurat compared to other analyses, and is also performed on another machine. We also utilize the R package, future (Bengtsson 2020), to parallelize some of the steps performed herein. Refer to sessionInfo() at the bottom of the page for the R and package versions used and additional information.
+
+Additional packages used: ggplot2 (Wickham 2016); scales (Wickham & Seifel 2020); writexl (Ooms 2020)
+
+```{r, message = FALSE}
+library(Seurat)
+library(future)
+library(writexl)
+```
+
+## Perform reference-based label transfer and mapping to porcine PBMCs
+
+### Load data
+
+Load in the reference dataset:
+
+```{r, warning = FALSE, error = FALSE}
+ref <- readRDS('/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/ReferenceData/HerreraWiarda_SsPBMC/reference_SsPBMC_HerreraWiarda.rds') 
+ref # let's see what we have here...
+```
+
+Load in the query data:
+
+```{r, warning = FALSE, error = FALSE}
+query <- readRDS('/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/QueryData/query_SsIleum_Wiarda.rds')
+query # let's see what we have here...
+```
+
+### Allow parallelization 
+
+```{r, warning = FALSE, error = FALSE}
+plan("multiprocess", workers = 4) # change plan to allow parallelization with 4 workers
+options(future.globals.maxSize = 5000 * 1024^2)
+```
+
+
+### Perform label transfer and mapping
+
+Perform predictions at three levels: 
+
+* prediction to reference cell lineage IDs (cell_lineage)
+* cell types (cell_type)
+* cell clusters (cell_cluster)
+
+Outputs will be weighted prediction scores, where each cell's prediction scores total 100% and a higher prediction score indicates greater prediction to a reference annotation grouping.
+
+Mapping scores indicate how well a query cell is represented by the reference dataset, with scores ranging from 0 to 1. A higher score indicates better representation by the reference data.
+
+```{r, warning = FALSE, error = FALSE, message = FALSE}
+MappingScores <- list()
+CellLineagePredictions <- list()
+CellTypePredictions <- list()
+CellClusterPredictions <- list()
+for(i in 1:length(query)) {
+  anchors <- FindTransferAnchors(
+    reference = ref,
+    query = query[[i]],
+    reduction = "cca", # opted to use cca since the method is recommended for cross-species mapping 
+    dims = 1:30, 
+    normalization.method = "LogNormalize")
+  predictions <- TransferData(anchorset = anchors, 
+                              refdata = list(cell_lineage = ref$cellLineage, 
+                                             cell_type = ref$cellType, 
+                                             cell_cluster = ref$seurat_clusters), # predict query dataset IDs at level of reference data's cluster, lineage, and cell type classifications
+                              dims = 1:30,
+                              weight.reduction = "cca")
+  MapScores <- MappingScore(
+    anchors = anchors@anchors,
+    combined.object = anchors@object.list[[1]],
+    query.neighbors =  slot(object = query[[i]], name = "neighbors")[["query_ref.nn"]],
+    query.weights = Tool(object = query[[i]], slot = "TransferData")$weights.matrix,
+    query.embeddings = Embeddings(object = query[[i]]),
+    ref.embeddings = Embeddings(object = ref),
+    nn.method = "annoy",
+    # n.trees = n.trees
+  )
+  MappingScores[[i]] <- MapScores
+  CellLineagePredictions[[i]] <- predictions$cell_lineage
+  CellTypePredictions[[i]] <- predictions$cell_type
+  CellClusterPredictions[[i]] <- predictions$cell_cluster
+} 
+
+MappingScores <- Reduce(c,MappingScores)
+MappingScores <- as.data.frame(MappingScores)
+CellLineagePredictions <- do.call(rbind, CellLineagePredictions)
+CellLineagePredictions <- as.data.frame(CellLineagePredictions)
+CellTypePredictions <- do.call(rbind, CellTypePredictions)
+CellTypePredictions <- as.data.frame(CellTypePredictions)
+CellClusterPredictions <- do.call(rbind, CellClusterPredictions)
+CellClusterPredictions <- as.data.frame(CellClusterPredictions)
+colnames(CellLineagePredictions) <- paste('CellLineage', colnames(CellLineagePredictions), sep = "_")
+colnames(CellTypePredictions) <- paste('CellType', colnames(CellTypePredictions), sep = "_")
+colnames(CellClusterPredictions) <- paste('CellCluster', colnames(CellClusterPredictions), sep = "_")
+```
+
+### Incorporate the new metadata
+
+Read in original Seurat object for pig ileum and incorporate in the meta data:
+
+```{r, warning = FALSE, error = FALSE}
+SsIleum_Wiarda <- readRDS('/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/Seurat/IleumAtlasAll.rds')
+SsIleum_Wiarda <- AddMetaData(object = SsIleum_Wiarda, 
+                              metadata = c(MappingScores, CellLineagePredictions, CellTypePredictions, CellClusterPredictions))
+```
+
+### Save the data
+
+Let's also save mapping scores and prediction scores in excel sheets:
+
+```{r, warning = FALSE, error = FALSE}
+MappingScores$CellBarcodes <- rownames(MappingScores)
+CellLineagePredictions$CellBarcodes <- rownames(CellLineagePredictions)
+CellTypePredictions$CellBarcodes <- rownames(CellTypePredictions)
+CellClusterPredictions$CellBarcodes <- rownames(CellClusterPredictions)
+MasterMeta <- merge(merge(merge(MappingScores, CellLineagePredictions), CellTypePredictions), CellClusterPredictions) # create a master file with all the information as well
+write_xlsx(MappingScores, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/MappingResults/SsPBMC_HerreraWiarda_MappingScores.xlsx')
+write_xlsx(CellLineagePredictions, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/MappingResults/SsPBMC_HerreraWiarda_CellLineagePredictions.xlsx')
+write_xlsx(CellTypePredictions, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/MappingResults/SsPBMC_HerreraWiarda_CellTypePredictions.xlsx')
+write_xlsx(CellClusterPredictions, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/MappingResults/SsPBMC_HerreraWiarda_CellClusterPredictions.xlsx')
+write_xlsx(MasterMeta, '/Users/jayne.wiarda/Desktop/scRNAseq/scRNAseqIleumAtlas/Ileum/MappingResults/SsPBMC_HerreraWiarda_MasterMeta_PredictionMapping.xlsx')
+```
+
+### View session information
+
+```{r, warning = FALSE, error = FALSE}
+sessionInfo()
+```
+
+### References
+
+Integrated analysis of multimodal single-cell data. Yuhan Hao, Stephanie Hao, Erica Andersen-Nissen, William M. Mauck III, Shiwei Zheng, Andrew Butler, Maddie J. Lee, Aaron J. Wilk, Charlotte Darby, Michael Zagar, Paul Hoffman, Marlon Stoeckius, Efthymia Papalexi, Eleni P. Mimitou, Jaison Jain, Avi Srivastava, Tim Stuart, Lamar B. Fleming, Bertrand Yeung, Angela J. Rogers, Juliana M. McElrath, Catherine A. Blish, Raphael Gottardo, Peter Smibert, Rahul Satija. bioRxiv 2020.10.12.335331; doi: https://doi.org/10.1101/2020.10.12.335331
+
+H. Bengtsson, A Unifying Framework for Parallel and Distributed Processing in R using Futures, arXiv:2008.00553, 2020
+
+Jeroen Ooms (2020). writexl: Export Data Frames to Excel 'xlsx' Format. R package version 1.3.1. https://CRAN.R-project.org/package=writexl
+ 
+Stuart and Butler et al. Comprehensive Integration of Single-Cell Data. Cell (2019).
+
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York, 2016.
+
+Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2020). dplyr: A Grammar of Data Manipulation. R package version 1.0.2. https://CRAN.R-project.org/package=dplyr
+
+Hadley Wickham and Dana Seidel (2020). scales: Scale Functions for Visualization. R package version 1.1.1. https://CRAN.R-project.org/package=scales
