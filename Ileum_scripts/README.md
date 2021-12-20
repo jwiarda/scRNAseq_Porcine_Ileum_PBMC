@@ -83,7 +83,7 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 16d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd | Differential gene expression analysis similar to 06d but with official cell type/lineage annotations instead of cell clusters |
 | 16e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd | Pseudobulk correlation analysis similar to 06e but with official cell type/lineage annotations instead of cell clusters |
 | 16f_Ileum_AllCellsAnnot_VisualizeMapPredict.Rmd | Visualizing mapping and prediction scores, now also considering official cell type/lineage annotations |
-| 17a_Ileum_TILCAnnot_GenCharacterization.Rmd |
+| 17a_Ileum_TILCAnnot_GenCharacterization.Rmd | Add final cell annotations to T/ILC lineage lymphocytes and visualize results |
 17b_Ileum_TILCAnnot_HierarchicalClustering.Rmd
 17c_Ileum_TILCAnnot_OverallDGE.Rmd
 18a_Ileum_BAnnot_GenCharacterization.Rmd
