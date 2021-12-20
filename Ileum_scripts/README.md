@@ -26,15 +26,15 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 06f_Ileum_AllCells_Lineage_Tissue_Comps.Rmd | Tissue composition comparisons, to determine differences in the compositions of different cells and/or transcripts across different sample types |
 | 06g_Ileum_AllCells_Sample_Comps.Rmd | Sample-specific quality comparisons, where we assess the whole transcriptomic profiles from each sample |
 | 06h_Ileum_AllCells_GeneSetEnrichment.Rmd | Cluster-based gene set enrichment analysis, where we calculate enrichment of signatures for sorted immune cell populations from bulk RNA-seq datasets within our single-cell dataset |
-| 07a | __ |
-| 07b | __ |
-| 07c | __ |
-| 07d | __ |
-| 07e | __ |
-| 07f | __ |
-| 07g | __ |
-| 07h | __ |
-| 07i | __ |
+| 07a_Ileum_AllCells_CreateReference_SsPBMC.Rmd | Create reference dataset from previously-published and annotated porcine PBMC scRNA-seq data |
+| 07b_Ileum_AllCells_CreateReference_HsIleum.Rmd | Create reference dataset from previously-published and annotated human ileum scRNA-seq data |
+| 07c_Ileum_AllCells_CreateReference_MmIleum.Rmd | Create reference dataset from previously-published and annotated murine ileum scRNA-seq data |
+| 07d_Ileum_AllCells_CreateQuery_SsIleum.Rmd | Convert porcine ileum scRNA-seq data into query datasets for comparison to previously-published porcine PBMCs |
+| 07e_Ileum_AllCells_CreateQuery_SsIleum_Humanized.Rmd | Convert porcine ileum scRNA-seq data into query datasets for comparison to previously-published human ileum |
+| 07f_Ileum_AllCells_CreateQuery_SsIleum_Murinized.Rmd | Convert porcine ileum scRNA-seq data into query datasets for comparison to previously-published murine ileum |
+| 07g_Ileum_AllCells_PredictionMapping_RefSsPBMC.Rmd | Perform reference-based mapping and label transfer of porcine ileum query data onto porcine PBMC reference data |
+| 07h_Ileum_AllCells_PredictionMapping_RefHsIleum.Rmd | Perform reference-based mapping and label transfer of porcine ileum query data onto human ileum reference data |
+| 07i_Ileum_AllCells_PredictionMapping_RefMmIleum.Rmd | Perform reference-based mapping and label transfer of porcine ileum query data onto murine ileum reference data |
 | 07j_Ileum_AllCells_PredictionMapping_Visualize.Rmd | Visualize the results of all cell mapping and label prediction |
 | 08a_Ileum_TILC_Subset_DimReduc.Rmd | Subset and re-process cells that were identified as T/ILC lineage lymphocytes |
 | 08b_Ileum_TILC_HierarchicalClustering.Rmd | Hierarchical clustering of the data to determine phylogenetic relationship amongst only T/ILC cell clusters |
