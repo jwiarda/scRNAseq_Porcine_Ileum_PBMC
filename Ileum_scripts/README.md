@@ -90,9 +90,9 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 18b_Ileum_BAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only B lineage lymphocytes with official cell type annotations |
 | 18c_Ileum_BAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only B lineage lymphocytes with official cell type annotations |
 | 19a_Ileum_MyeloidAnnot_GenCharacterization.Rmd | Add final cell type annotations to myeloid lineage lymphocytes and visualize results |
-19b_Ileum_MyeloidAnnot_HierarchicalClustering.Rmd
-19c_Ileum_MyeloidAnnot_OverallDGE.Rmd
-20a_Ileum_NonImmuneAnnot_GenCharacterization.Rmd
-20b_Ileum_NonImmuneAnnot_OverallDGE.Rmd
-21a_Ileum_PPcomp_Subset_DimReduc.Rmd
-21b_Ileum_PPcomp_DA.Rmd
+| 19b_Ileum_MyeloidAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only myeloid lineage lymphocytes with official cell type annotations |
+| 19c_Ileum_MyeloidAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only myeloid lineage lymphocytes with official cell type annotations |
+| 20a_Ileum_NonImmuneAnnot_GenCharacterization.Rmd | Add final cell type annotations to non-leukocytes and visualize results |
+| 20b_Ileum_NonImmuneAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only non-leukocytes with official cell type annotations |
+| 21a_Ileum_PPcomp_Subset_DimReduc.Rmd | Create a data subset consisting of only cells from PP and non-PP samples (excluding whole ileum samples) |
+| 21b_Ileum_PPcomp_DA.Rmd | Perform differential abundance analysis between cells derived from PP and non-PP samples (from data subset generated in 21a) |
