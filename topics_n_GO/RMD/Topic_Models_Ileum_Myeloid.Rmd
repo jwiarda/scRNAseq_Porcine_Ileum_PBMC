@@ -1,0 +1,554 @@
+---
+title: "Ileum Myeloid Cells - Topic Model Exploration"
+author: "Julian Trachsel"
+date: "5/5/2021"
+output: html_document
+---
+```{r, warning=F, message=F, results='hide'}
+library(tidyverse)
+library(fastTopics) 
+library(Seurat)
+library(scales)
+
+source('./scripts/analyze_fits.R')
+
+SEURAT <- read_rds('./data/Ileum_MyeloidOnly.rds')
+FITS <- read_rds('./topic_model_fits/Ileum_MyeloidOnly_K_3_K_10_topic_model_fits.rds')
+GROUP <- 'Ileum_Myeloid' # probably can find a way to cut this
+
+results <- analyze_fits(SEURAT = SEURAT, FITS = FITS, GROUP = GROUP, SEED=2)
+
+```
+
+
+## tabs {.tabset .tabset-fade .tabset-pills}  
+
+Different levels of topic model K below:  
+
+### K = 3 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k3$result$feature_plot
+results$k3$result$violin_plot
+results$k3$result$struct_plot_1
+results$k3$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k3$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k3$result$KMEANS_RES$KM4
+```
+##### KMeans K=5  
+
+```{r}
+results$k3$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k3$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k3$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k3$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k3$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k3$result$KMEANS_RES$KM10
+```
+
+### K = 4 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k4$result$feature_plot
+results$k4$result$violin_plot
+results$k4$result$struct_plot_1
+results$k4$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k4$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k4$result$KMEANS_RES$KM4
+```
+##### KMeans K=5  
+
+```{r}
+results$k4$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k4$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k4$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k4$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k4$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k4$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 5 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k5$result$feature_plot
+results$k5$result$violin_plot
+results$k5$result$struct_plot_1
+results$k5$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k5$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k5$result$KMEANS_RES$KM4
+```
+##### KMeans K=5  
+
+```{r}
+results$k5$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k5$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k5$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k5$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k5$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k5$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 6 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k6$result$feature_plot
+results$k6$result$violin_plot
+results$k6$result$struct_plot_1
+results$k6$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k6$result$KMEANS_RES$KM3
+```
+  
+##### KMeans K=4  
+```{r}
+results$k6$result$KMEANS_RES$KM4
+```
+  
+##### KMeans K=5  
+```{r}
+results$k6$result$KMEANS_RES$KM5
+```
+  
+##### KMeans K=6  
+```{r}
+results$k6$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k6$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k6$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k6$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k6$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 7 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k7$result$feature_plot
+results$k7$result$violin_plot
+results$k7$result$struct_plot_1
+results$k7$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k7$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k7$result$KMEANS_RES$KM4
+```
+
+##### KMeans K=5  
+```{r}
+results$k7$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k7$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k7$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k7$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k7$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k7$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 8 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k8$result$feature_plot
+results$k8$result$violin_plot
+results$k8$result$struct_plot_1
+results$k8$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k8$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k8$result$KMEANS_RES$KM4
+```
+
+##### KMeans K=5  
+```{r}
+results$k8$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k8$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k8$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k8$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k8$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k8$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 9 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k9$result$feature_plot
+results$k9$result$violin_plot
+results$k9$result$struct_plot_1
+results$k9$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k9$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k9$result$KMEANS_RES$KM4
+```
+
+##### KMeans K=5  
+```{r}
+results$k9$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k9$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k9$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k9$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k9$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k9$result$KMEANS_RES$KM10
+```
+
+
+
+
+
+### K = 10 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r}
+results$k10$result$feature_plot
+results$k10$result$violin_plot
+results$k10$result$struct_plot_1
+results$k10$result$struct_plot_2
+```
+
+
+#### KMEANS {.tabset .tabset-fade .tabset-pills}  
+
+##### KMeans K=3  
+```{r}
+results$k10$result$KMEANS_RES$KM3
+```
+
+##### KMeans K=4  
+```{r}
+results$k10$result$KMEANS_RES$KM4
+```
+
+##### KMeans K=5  
+```{r}
+results$k10$result$KMEANS_RES$KM5
+```
+
+##### KMeans K=6  
+```{r}
+results$k10$result$KMEANS_RES$KM6
+```   
+
+##### KMeans K=7  
+```{r}
+results$k10$result$KMEANS_RES$KM7
+```
+
+##### KMeans K=8  
+```{r}
+results$k10$result$KMEANS_RES$KM8
+```
+
+##### KMeans K=9  
+```{r}
+results$k10$result$KMEANS_RES$KM9
+```
+
+##### KMeans K=10  
+```{r}
+results$k10$result$KMEANS_RES$KM10
+```
+
+```{r}
+# 
+# 
+# for (KVAL in names(results)){
+# 
+#   
+# 
+#   i <- which(metadata$result_genome == result_genome)
+# 
+#   exper <- metadata$experiment[i]
+# 
+#   don <- metadata$donor_genome[i]
+# 
+#   rec <- metadata$recipient_genome[i]
+# 
+#   resu <- metadata$result_genome[i]
+# 
+#   exp_name <- paste(exper,':', don, '+', rec, '=', resu )
+# 
+# 
+# 
+#   cat("  \n###",  exp_name, "\n")
+# 
+# 
+# 
+#   RESULTS[[result_genome]] %>%
+# 
+#   select(c(1,6, 12, 16, 19, 20, 26)) %>%
+# 
+#   kable(caption = 'Transferred genomic islands') %>%
+# 
+#   kable_styling(bootstrap_options = 'striped') %>% print()
+# 
+# 
+# 
+# 
+# 
+#   plot_islands(RESULTS[[result_genome]], clust_level = quat_cluster) %>% print()
+# 
+# 
+# 
+#   TRANSFERRED[[result_genome]] %>%
+# 
+#   select(Gene, all_Qclusters, Annotation, 22:24) %>%
+# 
+#   kable(caption = 'Transferred Genes') %>%
+# 
+#   kable_styling(bootstrap_options = 'striped') %>% print()
+# 
+# 
+# 
+#   DELETED[[result_genome]] %>%
+# 
+#   select(Gene, all_Qclusters, Annotation, 22:24) %>%
+# 
+#   kable(caption = 'Deleted Genes') %>%
+# 
+#   kable_styling(bootstrap_options = 'striped') %>% print()
+# 
+#   cat(" END", exp_name, "  \n")
+# 
+# 
+# 
+#    cat("  \n*****
+# 
+# 
+# 
+# <br/>
+# 
+# <br/>
+# 
+# <br/>
+# 
+#   \n")
+# 
+# }
+# 
+
+```

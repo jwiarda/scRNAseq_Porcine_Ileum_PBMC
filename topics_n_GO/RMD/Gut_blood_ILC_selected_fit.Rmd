@@ -1,0 +1,74 @@
+---
+title: "Selected_topics"
+author: "Julian Trachsel"
+date: "5/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.full.width = TRUE)
+knitr::opts_chunk$set(fig.dim=c(8,6))
+
+
+library(tidyverse)
+library(fastTopics) 
+library(Seurat)
+library(scales)
+library(funfuns)
+library(knitr)
+library(kableExtra)
+
+source('./scripts/analyze_fits.R')
+# source('./scripts/selected_fits.R')
+
+
+SEURAT <- read_rds('./data/GutBlood_IntegratedILCs.rds')
+FITS <- read_rds('./topic_model_fits/GutBlood_IntegratedILCs_K_3_K_25_topic_model_fits.rds')
+
+GROUP <- 'GutBlood_ILC' # probably can find a way to cut this
+
+results <- analyze_fit(SEURAT = SEURAT,SINGLE_FIT = FITS[['k6']], GROUP = GROUP, SEED=2)
+
+
+```
+
+
+
+
+## Different Subsets of Interest {.tabset .tabset-fade .tabset-pills}  
+
+  
+### Gut Blood ILCs: topics k = 6 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$feature_plot
+results$violin_plot
+results$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$topics_sig_genes %>% dplyr::filter(LFC >0)%>% dplyr::arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
