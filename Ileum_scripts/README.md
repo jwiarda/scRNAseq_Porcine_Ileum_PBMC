@@ -4,7 +4,6 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 
 | File name | File description |
 |-----------|:----------------:|
-
 | 02_Ileum_Ambient_RNA_Removal.Rmd | Calculation and removal of contaminating ambient RNA from cells |
 | 03_Ileum_Gene_Cell_Filtering.Rmd | Filtering of non-expressed genes and poor quality cells | 
 | 04b_Ileum_Doublet_Removal.Rmd | Removal of cell doublets |
