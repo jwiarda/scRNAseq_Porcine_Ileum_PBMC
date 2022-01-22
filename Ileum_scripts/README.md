@@ -4,12 +4,7 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 
 | File name | File description |
 |-----------|:----------------:|
-| 00_Ileum_B_Annotations.Rmd | Hybrid method to create final annotations for B lineage lymphocytes after considering cell clustering, topic modeling, and spatial DGE results |
-| 00_Ileum_CD4T_Annotations.Rmd | Hybrid method to create final annotations for CD4 alpha beta T cells after considering cell clustering, topic modeling, and spatial DGE results |
-| 00_Ileum_GDCD8_Annotation.Rmd | Hybrid method to create final annotations for gamma delta & CD8 alpha beta T cells after considering cell clustering, topic modeling, and spatial DGE results |
-| 00_Ileum_ILC_Annotations.Rmd | Hybrid method to create final annotations for innate lymphoid cells after considering cell clustering, topic modeling, and spatial DGE results |
-| 00_Ileum_Myeloid_Annotations.Rmd | Method to create final annotations for myeloid lineage leukocytes based on cell clustering results |
-| 00_Ileum_NonImmune_Annotations.Rmd | Method to create final annotations for non-leukocytes based on cell clustering results |
+
 | 02_Ileum_Ambient_RNA_Removal.Rmd | Calculation and removal of contaminating ambient RNA from cells |
 | 03_Ileum_Gene_Cell_Filtering.Rmd | Filtering of non-expressed genes and poor quality cells | 
 | 04b_Ileum_Doublet_Removal.Rmd | Removal of cell doublets |
@@ -73,22 +68,28 @@ Only .Rmd files for scripts are available in this GitHub repository. Knit markdo
 | 15c_Ileum_NonImmune_OverallDGE.Rmd | Cluster-based differential gene expression analysis to determine genes differentially expressed in a single non-leukocyte cluster relative to the rest of the non-leukocytes |
 | 15d_Ileum_NonImmune_PredictionMapping_Visualization.Rmd | Visualize the results of cell mapping and label prediction for only non-leukocytes |
 | 15e_Ileum_NonImmune_SpatialDGE.Rmd | Cluster-independent calculation of differentially expressed genes and gene modules for only non-leukocytes in multidimensional data space |
-| 16a_Ileum_AllCellsAnnot_GenCharacterization.Rmd | General characterization of the data similar to 06a but with official cell type/lineage annotations instead of cell clusters |
-| 16b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd | Hierarchical clustering of the data similar to 06b but with official cell type/lineage annotations instead of cell clusters |
-| 16c_Ileum_AllCellsAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 06c but with official cell type/lineage annotations instead of cell clusters |
-| 16d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd | Differential gene expression analysis similar to 06d but with official cell type/lineage annotations instead of cell clusters |
-| 16e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd | Pseudobulk correlation analysis similar to 06e but with official cell type/lineage annotations instead of cell clusters |
-| 16f_Ileum_AllCellsAnnot_VisualizeMapPredict.Rmd | Visualizing mapping and prediction scores, now also considering official cell type/lineage annotations |
-| 17a_Ileum_TILCAnnot_GenCharacterization.Rmd | Add final cell type annotations to T/ILC lineage lymphocytes and visualize results |
-| 17b_Ileum_TILCAnnot_HierarchicalClustering.Rmd |  Hierarchical clustering similar to 16b but for only T/ILC lineage lymphocytes with official cell type annotations |
-| 17c_Ileum_TILCAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only T/ILC lineage lymphocytes with official cell type annotations |
-| 18a_Ileum_BAnnot_GenCharacterization.Rmd | Add final cell type annotations to B lineage lymphocytes and visualize results |
-| 18b_Ileum_BAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only B lineage lymphocytes with official cell type annotations |
-| 18c_Ileum_BAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only B lineage lymphocytes with official cell type annotations |
-| 19a_Ileum_MyeloidAnnot_GenCharacterization.Rmd | Add final cell type annotations to myeloid lineage lymphocytes and visualize results |
-| 19b_Ileum_MyeloidAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only myeloid lineage lymphocytes with official cell type annotations |
-| 19c_Ileum_MyeloidAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only myeloid lineage lymphocytes with official cell type annotations |
-| 20a_Ileum_NonImmuneAnnot_GenCharacterization.Rmd | Add final cell type annotations to non-leukocytes and visualize results |
-| 20b_Ileum_NonImmuneAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only non-leukocytes with official cell type annotations |
-| 21a_Ileum_PPcomp_Subset_DimReduc.Rmd | Create a data subset consisting of only cells from PP and non-PP samples (excluding whole ileum samples) |
-| 21b_Ileum_PPcomp_DA.Rmd | Perform differential abundance analysis between cells derived from PP and non-PP samples (from data subset generated in 21a) |
+| 16a_Ileum_B_Annotations.Rmd | Hybrid method to create final annotations for B lineage lymphocytes after considering cell clustering, topic modeling, and spatial DGE results |
+| 16b_Ileum_CD4T_Annotations.Rmd | Hybrid method to create final annotations for CD4 alpha beta T cells after considering cell clustering, topic modeling, and spatial DGE results |
+| 16c_Ileum_GDCD8_Annotation.Rmd | Hybrid method to create final annotations for gamma delta & CD8 alpha beta T cells after considering cell clustering, topic modeling, and spatial DGE results |
+| 16d_Ileum_ILC_Annotations.Rmd | Hybrid method to create final annotations for innate lymphoid cells after considering cell clustering, topic modeling, and spatial DGE results |
+| 16e_Ileum_Myeloid_Annotations.Rmd | Method to create final annotations for myeloid lineage leukocytes based on cell clustering results |
+| 16f_Ileum_NonImmune_Annotations.Rmd | Method to create final annotations for non-leukocytes based on cell clustering results |
+| 17a_Ileum_AllCellsAnnot_GenCharacterization.Rmd | General characterization of the data similar to 06a but with official cell type/lineage annotations instead of cell clusters |
+| 17b_Ileum_AllCellsAnnot_HierarchichalClustering.Rmd | Hierarchical clustering of the data similar to 06b but with official cell type/lineage annotations instead of cell clusters |
+| 17c_Ileum_AllCellsAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 06c but with official cell type/lineage annotations instead of cell clusters |
+| 17d_Ileum_AllCellsAnnot_PairwiseDGE.Rmd | Differential gene expression analysis similar to 06d but with official cell type/lineage annotations instead of cell clusters |
+| 17e_Ileum_AllCellsAnnot_Pseudobulk_Correlations.Rmd | Pseudobulk correlation analysis similar to 06e but with official cell type/lineage annotations instead of cell clusters |
+| 17f_Ileum_AllCellsAnnot_VisualizeMapPredict.Rmd | Visualizing mapping and prediction scores, now also considering official cell type/lineage annotations |
+| 18a_Ileum_TILCAnnot_GenCharacterization.Rmd | Add final cell type annotations to T/ILC lineage lymphocytes and visualize results |
+| 18b_Ileum_TILCAnnot_HierarchicalClustering.Rmd |  Hierarchical clustering similar to 16b but for only T/ILC lineage lymphocytes with official cell type annotations |
+| 18c_Ileum_TILCAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only T/ILC lineage lymphocytes with official cell type annotations |
+| 19a_Ileum_BAnnot_GenCharacterization.Rmd | Add final cell type annotations to B lineage lymphocytes and visualize results |
+| 19b_Ileum_BAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only B lineage lymphocytes with official cell type annotations |
+| 19c_Ileum_BAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only B lineage lymphocytes with official cell type annotations |
+| 20a_Ileum_MyeloidAnnot_GenCharacterization.Rmd | Add final cell type annotations to myeloid lineage lymphocytes and visualize results |
+| 20b_Ileum_MyeloidAnnot_HierarchicalClustering.Rmd | Hierarchical clustering similar to 16b but for only myeloid lineage lymphocytes with official cell type annotations |
+| 20c_Ileum_MyeloidAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only myeloid lineage lymphocytes with official cell type annotations |
+| 21a_Ileum_NonImmuneAnnot_GenCharacterization.Rmd | Add final cell type annotations to non-leukocytes and visualize results |
+| 21b_Ileum_NonImmuneAnnot_OverallDGE.Rmd | Differential gene expression analysis similar to 16c but for only non-leukocytes with official cell type annotations |
+| 22a_Ileum_PPcomp_Subset_DimReduc.Rmd | Create a data subset consisting of only cells from PP and non-PP samples (excluding whole ileum samples) |
+| 22b_Ileum_PPcomp_DA.Rmd | Perform differential abundance analysis between cells derived from PP and non-PP samples (from data subset generated in 21a) |
