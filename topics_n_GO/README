@@ -1,0 +1,18 @@
+The empty folders are paths that are used or created in my scripts and Rmd files
+
+
+Problems:  
+All data referenced in the scripts should probably be relative project paths.
+Currently we have many absolute paths.
+Ideally we would have a 'data' folder and a script that would fetch the data from 
+AgDataCommons and put it in the right location in the project.  
+
+Absolute paths in 05_GO_enrich.R that should probably be fixed
+
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/AllCells_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/B_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/CD4Tonly_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/gdCD8TOnly_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/ILConly_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/MyeloidOnly_OverallDE.xlsx'
+'/home/Julian.Trachsel/scRNAseqIleumAtlas/Ileum/DE/NonImmuneOnly_OverallDE.xlsx'

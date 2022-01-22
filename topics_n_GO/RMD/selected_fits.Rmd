@@ -1,0 +1,242 @@
+---
+title: "Selected_topics"
+author: "Julian Trachsel"
+date: "5/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(fig.full.width = TRUE)
+knitr::opts_chunk$set(fig.dim=c(8,6))
+
+
+library(tidyverse)
+library(fastTopics) 
+library(Seurat)
+library(scales)
+library(funfuns)
+library(knitr)
+library(kableExtra)
+
+source('./scripts/analyze_fits.R')
+source('./scripts/selected_fits.R')
+
+
+```
+
+
+
+CD4 only: topics k = 3, spatial DGE modules = 3  
+gd/CD8 only: topics = 3, spatial DGE modules = 4 and modules = 6  
+ILC only: topics = 3, spatial DGE modules = 3  
+B only: topics = 6, spatial DGE modules = 9  
+Myeloid only: topics = 5, spatial = don't know yet; skip for now  
+Non-immune only: topics = 6, spatial DGE modules = 9  
+
+## Different Subsets of Interest {.tabset .tabset-fade .tabset-pills}  
+
+  
+### CD4: topics k = 3 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$CD4$feature_plot
+results$CD4$violin_plot
+results$CD4$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$CD4$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$CD4$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$CD4$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
+
+
+  
+### gdCD8: topics k = 3 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$gdCD8$feature_plot
+results$gdCD8$violin_plot
+results$gdCD8$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$gdCD8$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$gdCD8$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$gdCD8$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
+### ILC: topics k = 3 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$ILC$feature_plot
+results$ILC$violin_plot
+results$ILC$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$ILC$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$ILC$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$ILC$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
+### BCell: topics k = 6 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$BCell$feature_plot
+results$BCell$violin_plot
+results$BCell$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$BCell$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$BCell$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$BCell$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
+
+  
+### Myeloid: topics k = 5 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$Myeloid$feature_plot
+results$Myeloid$violin_plot
+results$Myeloid$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$Myeloid$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$Myeloid$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$Myeloid$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
+
+
+### NonImmune: topics k = 6 {.tabset .tabset-fade .tabset-pills}  
+
+#### General Plots  
+```{r, fig.fullwidth=TRUE}
+results$NonImmune$feature_plot
+results$NonImmune$violin_plot
+results$NonImmune$struct_plot_1
+
+```
+
+
+#### Volcano Plots
+```{r}
+results$NonImmune$volcano_plots
+```
+
+
+#### Topic Enriched Genes
+```{r}
+
+results$NonImmune$topics_sig_genes %>% filter(LFC >0)%>% arrange(desc(Zscore)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = 'striped')
+```
+
+
+#### GO Terms 
+
+```{r}
+results$NonImmune$GO_terms %>% kable() %>% kable_styling(bootstrap_options = 'striped')
+```
+
