@@ -5,7 +5,7 @@ Table of file names and descriptions.
 | File name | File description |
 |-----------|:----------------:|
 | 01_PBMC_Alignment_Counting | Alignment and counting of reads to genome/genome annotation |
-| 02_PBMC_Ambient_RNA_Removal | Calculation and remocal of contaminating ambient RNA from cells |
+| 02_PBMC_Ambient_RNA_Removal | Calculation and removal of contaminating ambient RNA from cells |
 | 03_PBMC_Gene_Cell_Filtering | Filtering of non-expressed genes and poor quality cells |
 | 04a_Ileum_Doublet_Calculation | Calculation of cell doublets |
 | 04b_PBMC_Doublet_Removal | Removal of cell doublets |
