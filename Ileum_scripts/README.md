@@ -1,11 +1,13 @@
-Only .Rmd files for scripts are available in this GitHub repository. Knit markdown files for scripts listed, including output images and step-by-step process descriptions, are available at _______ . Additional input and output data from analyses can also be found at ______. Cell annotations created in 16a-f and used in subseqent scripts were made by also incorporating results from topic modeling and GO analyses included in a separate subdirectory.
+Table of file names and descriptions. Cell annotations created in 16a-f and used in subseqent scripts were made by also incorporating results from topic modeling and GO analyses included in a separate subdirectory.
 
 # File Key:
 
 | File name | File description |
 |-----------|:----------------:|
+| 01_Ileum_Alignment_Counting | Alignment and counting of reads to genome/genome annotation |
 | 02_Ileum_Ambient_RNA_Removal.Rmd | Calculation and removal of contaminating ambient RNA from cells |
 | 03_Ileum_Gene_Cell_Filtering.Rmd | Filtering of non-expressed genes and poor quality cells | 
+| 04a_Ileum_Doublet_Calculation | Calculation of cell doublets |
 | 04b_Ileum_Doublet_Removal.Rmd | Removal of cell doublets |
 | 05_Ileum_Normalize_Integrate_DimReduc_Cluster.Rmd | SCT and log normalization, integration, calculation of PCA, UMAP, and t-SNE dimensionality reductions, and cell clustering |
 | 06a_Ileum_AllCells_GenCharacterization.Rmd | General characterization of the data, where we visualize various metrics for our cells and/or clusters and query canonical genes to assign cell lineage identities to cel clusters |
